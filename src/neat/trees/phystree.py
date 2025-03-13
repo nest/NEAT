@@ -878,13 +878,22 @@ class PhysTree(MorphTree):
         aux_tree = self.create_new_tree(locs, new_tree=PhysTree())
         fd_tree = self.create_compartment_tree(locs)
 
-        for ii, (fd_node, aux_node, loc) in enumerate(zip(fd_tree, aux_tree, locs)):
+        fd_nodes = fd_tree.nodes
+        aux_nodes = aux_tree.nodes
+
+        print("lenghts:", len(fd_tree), len(aux_tree), len(locs))
+        for ii in range(len(locs)):
+            fd_node = fd_nodes[ii]
+            aux_node = aux_nodes[ii]
+            loc = locs[ii]
+        # for ii, (fd_node, aux_node, loc) in enumerate(zip(fd_tree, aux_tree, locs)):
             assert aux_node.content["loc idx"] == fd_node.loc_idx
 
             # unit conversion [um] -> [cm]
             R_ = aux_node.R * 1e-4
             L_ = aux_node.L * 1e-4
-
+            print(ii)
+            print("(ii)")
             if fd_tree.is_root(fd_node):
                 # for the soma we apply the spherical approximation
                 surf = 4.0 * np.pi * R_**2
@@ -899,7 +908,7 @@ class PhysTree(MorphTree):
             fd_node.currents = {
                 chan: (surf * g, e) for chan, (g, e) in aux_node.currents.items()
             }
-
+            print("(iii)")
             for chan in aux_node.currents:
                 if chan not in fd_tree.channel_storage and chan in self.channel_storage:
                     fd_tree.channel_storage[chan] = copy.deepcopy(
@@ -932,9 +941,15 @@ class PhysTree(MorphTree):
                         )
                     else:
                         fd_parent.currents[chan] = (0.0, e_parent)
-
+            print("(iv)")
+        print("(v)")
         # set concentration mechanisms in separate pass
-        for ii, (fd_node, aux_node, loc) in enumerate(zip(fd_tree, aux_tree, locs)):
+        # for ii, (fd_node, aux_node, loc) in enumerate(zip(fd_tree, aux_tree, locs)):
+        for ii in range(len(locs)):
+            fd_node = fd_nodes[ii]
+            aux_node = aux_nodes[ii]
+            loc = locs[ii]
+            
             for ion in aux_node.concmechs:
                 ion_factors_aux = 0.0
                 ion_factors_fd = 0.0
