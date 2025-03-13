@@ -824,21 +824,35 @@ class CompartmentFitter(EquilibriumTree):
             The corresponding list of fit locations.
         """
         ctree, locs = self.convert_fit_arg(fit_arg)
+
         # compute SOV matrices for fit
-        alphas, phimat, importance, sov_tree = self._calc_sov_mats(locs, pprint=pprint)
+        try:
+            alphas, phimat, importance, sov_tree = self._calc_sov_mats(locs, pprint=pprint)
+            # fit the capacitances from SOV time-scales
+            ctree.compute_c(-alphas[inds] * 1e3, phimat[inds, :], weights=importance[inds])
 
-        # fit the capacitances from SOV time-scales
-        ctree.compute_c(-alphas[inds] * 1e3, phimat[inds, :], weights=importance[inds])
+            def calcTau():
+                nm = len(locs)
+                # original timescales
+                taus_orig = np.sort(np.abs(1.0 / alphas))[::-1][:nm]
+                # fitted timescales
+                lambdas, _, _ = ctree.calc_eigenvalues()
+                taus_fit = np.sort(np.abs(1.0 / lambdas))[::-1]
 
-        def calcTau():
-            nm = len(locs)
-            # original timescales
-            taus_orig = np.sort(np.abs(1.0 / alphas))[::-1][:nm]
-            # fitted timescales
-            lambdas, _, _ = ctree.calc_eigenvalues()
-            taus_fit = np.sort(np.abs(1.0 / lambdas))[::-1]
+                return taus_orig, taus_fit
 
-            return taus_orig, taus_fit
+            taus_orig, taus_fit = calcTau()
+
+            if check_fit:
+                fit_not_sane = np.abs(taus_fit[0] - taus_orig[0]) > 0.8 * taus_orig[0]
+            else:
+                fit_not_sane = False
+
+        except Exception as e:
+            if pprint:
+                print(f"Issue in SOV calculations:\n{e}\n> reverting to membrane timescale matching")
+            sov_tree = self.create_tree_sov()
+            fit_not_sane = True
 
         def calcTauM():
             clocs = [locs[n.loc_idx] for n in ctree]
@@ -857,10 +871,7 @@ class CompartmentFitter(EquilibriumTree):
 
             return taus_m_orig, taus_m_fit
 
-        taus_orig, taus_fit = calcTau()
-        if (
-            check_fit and np.abs(taus_fit[0] - taus_orig[0]) > 0.8 * taus_orig[0]
-        ) or force_tau_m_fit:
+        if fit_not_sane or force_tau_m_fit:
 
             taus_m_orig, taus_m_fit = calcTauM()
             # if fit was not sane, revert to more basic membrane timescale match
