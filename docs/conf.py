@@ -14,7 +14,8 @@ filterwarnings(
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('..'))
+
+sys.path.insert(0, os.path.abspath(".."))
 
 # General configuration
 # ---------------------
@@ -22,7 +23,8 @@ sys.path.insert(0, os.path.abspath('..'))
 
 # Trick to get the jupyter nbs to the documentation
 import shutil
-project_root = '..'
+
+project_root = ".."
 print("Copy tutorial notebooks into docs/_tutorials")
 
 
@@ -35,9 +37,11 @@ def all_but_ipynb(dir, contents):
 
 
 shutil.rmtree(os.path.join(project_root, "docs/_tutorials"), ignore_errors=True)
-shutil.copytree(os.path.join(project_root, "tutorials"),
-                os.path.join(project_root, "docs/_tutorials"),
-                ignore=all_but_ipynb)
+shutil.copytree(
+    os.path.join(project_root, "tutorials"),
+    os.path.join(project_root, "docs/_tutorials"),
+    ignore=all_but_ipynb,
+)
 
 # Add any Sphinx extension module names here, as strings. They can be extensions
 # coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
@@ -54,7 +58,7 @@ extensions = [
     "sphinx_gallery.gen_gallery",
     "nb2plots",
     "texext",
-    "nbsphinx"
+    "nbsphinx",
 ]
 
 # generate autosummary pages
@@ -91,7 +95,12 @@ source_encoding = "utf-8"
 master_doc = "index"
 
 # Do not include release announcement template
-exclude_patterns = ["release/release_template.rst", "neat/fittools", '_build', '**.ipynb_checkpoints']
+exclude_patterns = [
+    "release/release_template.rst",
+    "neat/fittools",
+    "_build",
+    "**.ipynb_checkpoints",
+]
 
 # General substitutions.
 project = "NEAT"
@@ -127,13 +136,13 @@ add_module_names = False
 # show_authors = True
 
 sphinx_gallery_conf = {
-    'examples_dirs': '../examples',   # path to your example scripts
-    'gallery_dirs': 'auto_examples',  # path to where to save gallery generated output
-    'plot_gallery': False,
-    'filename_pattern': '/plot',
-    'ignore_pattern': r'.*util\.py'
+    "examples_dirs": "../examples",  # path to your example scripts
+    "gallery_dirs": "auto_examples",  # path to where to save gallery generated output
+    "plot_gallery": False,
+    "filename_pattern": "/plot",
+    "ignore_pattern": r".*util\.py",
 }
-nbsphinx_execute = 'never'
+nbsphinx_execute = "never"
 
 # The name of the Pygments (syntax highlighting) style to use.
 # pygments_style = 'friendly'
@@ -142,7 +151,7 @@ pygments_style = "manni"
 # A list of prefixs that are ignored when creating the module index. (new in Sphinx 0.6)
 modindex_common_prefix = ["neat."]
 
-#doctest_global_setup = "import neat"
+# doctest_global_setup = "import neat"
 
 # Options for HTML output
 # -----------------------
@@ -189,8 +198,7 @@ html_theme_options = {
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
-html_css_files = [
-    "custom.css"]
+html_css_files = ["custom.css"]
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
@@ -204,7 +212,9 @@ html_last_updated_fmt = "%b %d, %Y"
 # html_index = 'index.html'
 
 # Custom sidebar templates, maps page names to templates.
-html_sidebars = {"**": ["logo-text.html", "globaltoc.html", "localtoc.html", "searchbox.html"]}
+html_sidebars = {
+    "**": ["logo-text.html", "globaltoc.html", "localtoc.html", "searchbox.html"]
+}
 
 # Additional templates that should be rendered to pages, maps page names to
 # templates.

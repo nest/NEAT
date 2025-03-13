@@ -656,7 +656,7 @@ class TestMorphTree:
             assert loc == checkloc
         # test random loc distribution
         locs = self.tree.distribute_locs_random(10, dx=100)
-        assert len(locs)> 0 and len(locs) < 10
+        assert len(locs) > 0 and len(locs) < 10
         for node in self.tree:
             assert "tag" not in node.content
         locs = self.tree.distribute_locs_random(10, node_arg="basal", add_soma=0)
@@ -665,7 +665,7 @@ class TestMorphTree:
             self.tree.distribute_locs_random(10, node_arg="bad type")
         locs = self.tree.distribute_locs_random(10)
         assert len(locs) == 11
-        locs = self.tree.distribute_locs_random(10, dx=0.)
+        locs = self.tree.distribute_locs_random(10, dx=0.0)
         assert len(locs) == 11
         locs = self.tree.distribute_locs_random(10, add_soma=False)
         assert len(locs) == 10
@@ -694,7 +694,6 @@ class TestMorphTree:
         with new_tree.as_original_tree:
             assert new_tree.root is not None
         assert new_tree.root is not None
-
 
     def test_plotting(self, pshow=0):
         self.load_tree()

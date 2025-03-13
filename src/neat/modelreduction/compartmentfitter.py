@@ -827,9 +827,13 @@ class CompartmentFitter(EquilibriumTree):
 
         # compute SOV matrices for fit
         try:
-            alphas, phimat, importance, sov_tree = self._calc_sov_mats(locs, pprint=pprint)
+            alphas, phimat, importance, sov_tree = self._calc_sov_mats(
+                locs, pprint=pprint
+            )
             # fit the capacitances from SOV time-scales
-            ctree.compute_c(-alphas[inds] * 1e3, phimat[inds, :], weights=importance[inds])
+            ctree.compute_c(
+                -alphas[inds] * 1e3, phimat[inds, :], weights=importance[inds]
+            )
 
             def calcTau():
                 nm = len(locs)
@@ -850,7 +854,9 @@ class CompartmentFitter(EquilibriumTree):
 
         except Exception as e:
             if pprint:
-                print(f"Issue in SOV calculations:\n{e}\n> reverting to membrane timescale matching")
+                print(
+                    f"Issue in SOV calculations:\n{e}\n> reverting to membrane timescale matching"
+                )
             sov_tree = self.create_tree_sov()
             fit_not_sane = True
 
