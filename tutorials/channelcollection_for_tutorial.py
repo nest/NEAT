@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# channelcollection.py
+# channelcollection_for_tutorial.py
 #
 # This file is part of NEST.
 #
