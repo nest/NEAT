@@ -43,32 +43,33 @@ EXIT_BAD_HEADER = 1
 source_dir = os.getcwd()
 
 exclude_dirs = [
-    '.git',
-    'extras',
-    'build',
-    'examples',
-    'docs',
-    'src/neat/simulations/nest/tmp',
-    'src/neat/simulations/neuron/tmp',
-    'src/neat/tools/interval',
+    ".git",
+    "extras",
+    "build",
+    "examples",
+    "docs",
+    "src/neat/simulations/nest/tmp",
+    "src/neat/simulations/neuron/tmp",
+    "src/neat/tools/interval",
 ]
 
 # match all file names against these regular expressions. if a match
 # is found the file is excluded from the check
-exclude_file_patterns = ['\.#.*', '#.*', '.*~', '.*.bak']
+exclude_file_patterns = ["\.#.*", "#.*", ".*~", ".*.bak"]
 exclude_file_regex = [re.compile(pattern) for pattern in exclude_file_patterns]
 
-exclude_files = [
-]
+exclude_files = []
 
 templates = {
-    ('py', 'pyx', 'pxd', 'toml'): 'py',
-    ('cc', 'h'): 'cc',
+    ("py", "pyx", "pxd", "toml"): "py",
+    ("cc", "h"): "cc",
 }
 
 template_contents = {}
 for extensions, template_ext in templates.items():
-    template_name = os.path.join(source_dir, "extras/copyright_header_template." + template_ext)
+    template_name = os.path.join(
+        source_dir, "extras/copyright_header_template." + template_ext
+    )
     with open(template_name) as template_file:
         template = template_file.readlines()
         for ext in extensions:
@@ -77,7 +78,7 @@ for extensions, template_ext in templates.items():
 total_files = 0
 total_errors = 0
 for dirpath, _, fnames in os.walk(source_dir):
-    if any([exclude_dir in dirpath[len(source_dir):] for exclude_dir in exclude_dirs]):
+    if any([exclude_dir in dirpath[len(source_dir) :] for exclude_dir in exclude_dirs]):
         continue
 
     for fname in fnames:
@@ -93,29 +94,40 @@ for dirpath, _, fnames in os.walk(source_dir):
         if any([exclude_file in tested_file for exclude_file in exclude_files]):
             continue
 
-        with open(tested_file, encoding='utf-8') as source_file:
+        with open(tested_file, encoding="utf-8") as source_file:
             total_files += 1
             for template_line in template_contents[extension]:
                 try:
                     line_src = source_file.readline()
                 except UnicodeDecodeError as err:
-                    print("Unable to decode bytes in '{0}': {1}".format(tested_file, err))
+                    print(
+                        "Unable to decode bytes in '{0}': {1}".format(tested_file, err)
+                    )
                     total_errors += 1
                     break
-                if (extension == 'py' and line_src.strip() == '#!/usr/bin/env python3'):
+                if extension == "py" and line_src.strip() == "#!/usr/bin/env python3":
                     line_src = source_file.readline()
-                line_exp = template_line.replace('{{file_name}}', fname)
-                
+                line_exp = template_line.replace("{{file_name}}", fname)
+
                 if line_src != line_exp:
-                    print(f"\n----\nIn file {tested_file}:\n\n{line_src}\n{line_exp}\n-----")
+                    print(
+                        f"\n----\nIn file {tested_file}:\n\n{line_src}\n{line_exp}\n-----"
+                    )
                     fname = os.path.relpath(tested_file)
-                    print("[COPYRIGHT-HEADER-CHECK] {0}: expected '{1}', found '{2}'.".format(
-                        fname, line_exp.rstrip('\n'), line_src.rstrip('\n')))
+                    print(
+                        "[COPYRIGHT-HEADER-CHECK] {0}: expected '{1}', found '{2}'.".format(
+                            fname, line_exp.rstrip("\n"), line_src.rstrip("\n")
+                        )
+                    )
                     print("... {}\\n".format(fname))
                     total_errors += 1
                     break
 
-print("{0} out of {1} files have an erroneous copyright header.".format(total_errors, total_files))
+print(
+    "{0} out of {1} files have an erroneous copyright header.".format(
+        total_errors, total_files
+    )
+)
 
 if total_errors > 0:
     sys.exit(EXIT_BAD_HEADER)
