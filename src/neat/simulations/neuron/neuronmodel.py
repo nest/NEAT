@@ -148,7 +148,7 @@ class NeuronSimNode(PhysNode):
             compartment.L = self.L  # section length [um]
             # set number of segments
             if type(factorlambda) == float:
-                # nseg according to NEURON bookint
+                # nseg according to NEURON book
                 compartment.nseg = int(
                     ((compartment.L / (0.1 * h.lambda_f(100.0)) + 0.9) / 2.0) * 2.0
                     + 1.0
