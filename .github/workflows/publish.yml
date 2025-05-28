@@ -5,8 +5,53 @@ on:
     types: [created]
 
 jobs:
+  make_sdist:
+    name: Build Source Distribution (SDist)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetches full history, useful for setuptools_scm versioning [2]
+          submodules: true # Include if your project uses Git submodules [2]
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x' # Use a compatible Python version for building [2]
+      - name: Install build tools
+        run: pip install build pipx # 'build' for SDist, 'pipx' for isolated execution [2]
+      - name: Build SDist
+        run: pipx run build --sdist # Modern way to create a source distribution [2]
+      - name: Upload SDist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-sdist # Consistent naming for later download [2]
+          path: dist/*.tar.gz # Path to the generated SDist file [2]
+
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }} # Dynamically selects the runner OS (Linux, macOS, Windows) [2]
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest] # Build wheels for these operating systems [2]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4 # Checks out the repository code [2]
+      - name: Build wheels with cibuildwheel
+        uses: pypa/cibuildwheel@v2.16.2 # Uses the cibuildwheel GitHub Action [2]
+        env:
+          CIBUILDWHEEL: 1 # Ensures C extensions are built if optional [3, 4]
+          # Example: CIBW_BEFORE_ALL_LINUX: curl -sSf https://sh.rustup.rs | sh -s -- -y # Install system-level build tools [3]
+          # Example: CIBW_ENVIRONMENT_LINUX: "PATH=$HOME/.cargo/bin:$PATH" # Set environment variables [3]
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }} # Unique name per OS for the artifact [2]
+          path: wheelhouse/*.whl # cibuildwheel's default output directory for wheels [2]
+
   pypi-publish:
     name: Publish release to PyPI
+    needs: [make_sdist, build_wheels] # Ensures SDist and wheels are built before uploading [2]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -31,3 +76,25 @@ jobs:
           python -m build --sdist --wheel # Modern way to build sdist and wheel
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  upload_all:
+    name: Publish to PyPI
+    needs: [make_sdist, build_wheels] # Ensures SDist and wheels are built before uploading [2]
+    environment: pypi # Links to a PyPI environment for OIDC authentication [2]
+    permissions:
+      id-token: write # Essential for OIDC authentication with PyPI [2]
+    runs-on: ubuntu-latest
+    # This condition ensures the upload only happens on a *published* GitHub release [2]
+    if: github.event_name == 'release' && github.event.action == 'published'
+    steps:
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cibw-* # Downloads all artifacts whose names start with 'cibw-' [2]
+          path: dist # Downloads them into a single 'dist' directory [2]
+          merge-multiple: true # Crucial for combining artifacts from different jobs [2]
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1 # Dedicated GitHub Action for PyPI upload [2]
+        # This action automatically uses the OIDC token from `id-token: write` permission.
+        # No need to provide PYPI_TOKEN explicitly if OIDC is configured.
+        # repository-url: https://upload.pypi.org/legacy/ # Uncomment for custom PyPI instance
