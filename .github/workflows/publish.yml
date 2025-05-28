@@ -2,7 +2,7 @@ name: Upload Python Package to PyPI when a Release is Created
 
 on:
   release:
-    types: [created, published, released]
+    types: [created]
 
 jobs:
   pypi-publish:
@@ -12,19 +12,26 @@ jobs:
       name: pypi
       url: https://pypi.org/p/nest-neat
     permissions:
-      id-token: write
+      id-token: write # Required for OIDC authentication with PyPI
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Ensures full history for versioning if needed
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.x"
-      - name: Install dependencies
+          cache: 'pip' # Cache pip dependencies for faster builds
+      - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools wheel
-      - name: Build package
+          pip install build wheel setuptools # 'build' is the modern standard
+      - name: Build package distributions
         run: |
-          python setup.py sdist bdist_wheel  # Could also be python -m build
+          python -m build --sdist --wheel # Modern way to build sdist and wheel
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # This action automatically uses the OIDC token from `id-token: write` permission
+          # No need to provide PYPI_TOKEN explicitly if OIDC is configured
+          # repository-url: https://upload.pypi.org/legacy/ # Uncomment for custom PyPI instance
