@@ -33,7 +33,7 @@ jobs:
     runs-on: ${{ matrix.os }} # Dynamically selects the runner OS (Linux, macOS, Windows) [2]
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest] # Build wheels for these operating systems [2]
+        os: [ubuntu-latest, macos-latest] #, windows-latest] # Build wheels for these operating systems [2]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4 # Checks out the repository code [2]
@@ -49,33 +49,33 @@ jobs:
           name: cibw-wheels-${{ matrix.os }} # Unique name per OS for the artifact [2]
           path: wheelhouse/*.whl # cibuildwheel's default output directory for wheels [2]
 
-  pypi-publish:
-    name: Publish release to PyPI
-    needs: [make_sdist, build_wheels] # Ensures SDist and wheels are built before uploading [2]
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/nest-neat
-    permissions:
-      id-token: write # Required for OIDC authentication with PyPI
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Ensures full history for versioning if needed
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.x"
-          cache: 'pip' # Cache pip dependencies for faster builds
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install build wheel setuptools # 'build' is the modern standard
-      - name: Build package distributions
-        run: |
-          python -m build --sdist --wheel # Modern way to build sdist and wheel
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+  # pypi-publish:
+  #   name: Publish release to PyPI
+  #   needs: [make_sdist, build_wheels] # Ensures SDist and wheels are built before uploading [2]
+  #   runs-on: ubuntu-latest
+  #   environment:
+  #     name: pypi
+  #     url: https://pypi.org/p/nest-neat
+  #   permissions:
+  #     id-token: write # Required for OIDC authentication with PyPI
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0 # Ensures full history for versioning if needed
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v4
+  #       with:
+  #         python-version: "3.x"
+  #         cache: 'pip' # Cache pip dependencies for faster builds
+  #     - name: Install build dependencies
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install build wheel setuptools # 'build' is the modern standard
+  #     - name: Build package distributions
+  #       run: |
+  #         python -m build --sdist --wheel # Modern way to build sdist and wheel
+  #     - name: Publish package distributions to PyPI
+  #       uses: pypa/gh-action-pypi-publish@release/v1
 
   upload_all:
     name: Publish to PyPI
@@ -84,8 +84,6 @@ jobs:
     permissions:
       id-token: write # Essential for OIDC authentication with PyPI [2]
     runs-on: ubuntu-latest
-    # This condition ensures the upload only happens on a *published* GitHub release [2]
-    if: github.event_name == 'release' && github.event.action == 'published'
     steps:
       - name: Download all built artifacts
         uses: actions/download-artifact@v4
