@@ -126,6 +126,7 @@ def up(f):
 
 class NanException(ValueError):
     "Exception thrown when an unwanted nan is encountered."
+
     pass
 
 
