@@ -204,6 +204,9 @@ class TestPhysTree:
         # as wrong type
         with pytest.raises(TypeError):
             self.tree.set_leak_current([])
+        # wrong sign
+        with pytest.raises(AssertionError):
+            self.tree.set_leak_current(e_l, g_l)
 
         # gmax as potential as float
         e_rev = 100.0
@@ -233,6 +236,9 @@ class TestPhysTree:
         # check if error is thrown if an ionchannel is not give
         with pytest.raises(IOError):
             self.tree.add_channel_current("test_channel2", g_max, e_rev)
+        # check if error is thrown if an ionchannel is not give
+        with pytest.raises(AssertionError):
+            self.tree.add_channel_current(channel, -10.0, e_rev)
 
     def test_membrane_functions(self):
         self.load_tree()
