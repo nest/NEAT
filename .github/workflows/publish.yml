@@ -55,7 +55,7 @@ jobs:
     runs-on: ${{ matrix.os }} # Dynamically selects the runner OS (Linux, macOS, Windows) [2]
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest] # Build wheels for these operating systems [2]
+        os: [ubuntu-latest, macos-latest] #, windows-latest] # Build wheels for these operating systems [2]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4 # Checks out the repository code [2]
@@ -102,7 +102,7 @@ jobs:
 
   upload_all:
     name: Publish to PyPI
-    needs: [make_sdist] #, build_wheels] # Ensures SDist and wheels are built before uploading [2]
+    needs: [make_sdist, build_wheels] # Ensures SDist and wheels are built before uploading [2]
     environment: pypi # Links to a PyPI environment for OIDC authentication [2]
     permissions:
       id-token: write # Essential for OIDC authentication with PyPI [2]
