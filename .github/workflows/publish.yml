@@ -28,26 +28,26 @@ jobs:
           name: cibw-sdist # Consistent naming for later download [2]
           path: dist/*.tar.gz # Path to the generated SDist file [2]
 
-  build_wheels:
-    name: Build wheels on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }} # Dynamically selects the runner OS (Linux, macOS, Windows) [2]
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest] #, windows-latest] # Build wheels for these operating systems [2]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4 # Checks out the repository code [2]
-      - name: Build wheels with cibuildwheel
-        uses: pypa/cibuildwheel@v2.16.2 # Uses the cibuildwheel GitHub Action [2]
-        env:
-          CIBUILDWHEEL: 1 # Ensures C extensions are built if optional [3, 4]
-          # Example: CIBW_BEFORE_ALL_LINUX: curl -sSf https://sh.rustup.rs | sh -s -- -y # Install system-level build tools [3]
-          # Example: CIBW_ENVIRONMENT_LINUX: "PATH=$HOME/.cargo/bin:$PATH" # Set environment variables [3]
-      - name: Upload wheel artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: cibw-wheels-${{ matrix.os }} # Unique name per OS for the artifact [2]
-          path: wheelhouse/*.whl # cibuildwheel's default output directory for wheels [2]
+  # build_wheels:
+  #   name: Build wheels on ${{ matrix.os }}
+  #   runs-on: ${{ matrix.os }} # Dynamically selects the runner OS (Linux, macOS, Windows) [2]
+  #   strategy:
+  #     matrix:
+  #       os: [ubuntu-latest, macos-latest] #, windows-latest] # Build wheels for these operating systems [2]
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4 # Checks out the repository code [2]
+  #     - name: Build wheels with cibuildwheel
+  #       uses: pypa/cibuildwheel@v2.16.2 # Uses the cibuildwheel GitHub Action [2]
+  #       env:
+  #         CIBUILDWHEEL: 1 # Ensures C extensions are built if optional [3, 4]
+  #         # Example: CIBW_BEFORE_ALL_LINUX: curl -sSf https://sh.rustup.rs | sh -s -- -y # Install system-level build tools [3]
+  #         # Example: CIBW_ENVIRONMENT_LINUX: "PATH=$HOME/.cargo/bin:$PATH" # Set environment variables [3]
+  #     - name: Upload wheel artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: cibw-wheels-${{ matrix.os }} # Unique name per OS for the artifact [2]
+  #         path: wheelhouse/*.whl # cibuildwheel's default output directory for wheels [2]
 
   # pypi-publish:
   #   name: Publish release to PyPI
@@ -79,7 +79,7 @@ jobs:
 
   upload_all:
     name: Publish to PyPI
-    needs: [make_sdist, build_wheels] # Ensures SDist and wheels are built before uploading [2]
+    needs: [make_sdist] #, build_wheels] # Ensures SDist and wheels are built before uploading [2]
     environment: pypi # Links to a PyPI environment for OIDC authentication [2]
     permissions:
       id-token: write # Essential for OIDC authentication with PyPI [2]
