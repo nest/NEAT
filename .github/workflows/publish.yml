@@ -55,7 +55,7 @@ jobs:
     runs-on: ${{ matrix.os }} # Dynamically selects the runner OS (Linux, macOS, Windows) [2]
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest] # Build wheels for these operating systems [2]
+        os: [ubuntu-latest, macos-latest] #, windows-latest] # Build wheels for these operating systems [2]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4 # Checks out the repository code [2]
