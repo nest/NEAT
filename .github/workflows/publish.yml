@@ -31,7 +31,3 @@ jobs:
           python -m build --sdist --wheel # Modern way to build sdist and wheel
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          # This action automatically uses the OIDC token from `id-token: write` permission
-          # No need to provide PYPI_TOKEN explicitly if OIDC is configured
-          # repository-url: https://upload.pypi.org/legacy/ # Uncomment for custom PyPI instance
