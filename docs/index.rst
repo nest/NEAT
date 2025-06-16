@@ -12,17 +12,14 @@ with and analyze the morphologies.
 
 NEAT also allows for the convenient definition of morphological neuron models.
 These models can be simulated, through an interface with the NEURON simulator
-[Carnevale2004]_, or can be analyzed with two classical methods: *(i)* the
-separation of variables method [Major1993]_ to obtain impedance kernels as
-a superposition of exponentials and *(ii)* Koch's method to compute impedances
-with linearized ion channels analytically in the frequency domain [Koch1985]_.
-Furthermore, NEAT implements the neural evaluation tree framework [Wybo2019]_
-and an associated C++ simulator, to analyze subunit independence.
-
+[Carnevale2004]_ and the NEST simulator [Gewaltig2007]_, or can be analyzed with 
+semi-analytical methods, e.g. the separation of variables method [Major1993]_ 
+to obtain impedance kernels as a superposition of exponentials, or Koch's method 
+to compute impedances with linearized ion channels analytically in the frequency 
+domain [Koch1985]_. Furthermore, NEAT implements the neural evaluation tree 
+framework [Wybo2019]_ and an associated C++ simulator, to analyze subunit independence.
 Finally, NEAT implements a new and powerful method to simplify morphological
-neuron models into compartmental models with few compartments [Wybo2021]_. For
-these models, NEAT also provides a NEURON interface so that they can be
-simulated directly, and will soon also provide a NEST interface [Gewaltig2007]_.
+neuron models into compartmental models with few compartments [Wybo2021]_. 
 
 Structure
 ---------
@@ -41,14 +38,14 @@ NEAT furthermore has a number of other classes, notably to implement ion
 channels (`neat.IonChannel`) and to provide a high-level API for the
 simplification method described in [Wybo2021]_ (`neat.CompartmentFitter`).
 
-.. figure:: figures/neat_overview.png
-   :height: 380 px
-   :width: 550 px
-   :scale: 100 %
+.. figure:: figures/NEATdocs_overview.png
+   :height: 175 px
+   :width: 990 px
+   :scale: 50 %
    :alt: NEAT structure overview
 
-   **Figure 1.** Overview of NEAT structures. NEAT contains a number of tree classes,
-   inheriting from `neat.STree`, as well as a number of helper classes.
+   **Figure 1.** Overview of NEAT structures. NEAT contains a range of tree classes,
+   inheriting from `neat.STree`.
 
 A NEAT tree consists of nodes, and each tree class has a corresponding node class
 (Figure 2A). A tree class contains a `root` attribute (Figure 2B), which points to the
@@ -58,15 +55,17 @@ it can be accessed from the tree class), a reference to its parent node (``None`
 if the node is the root), and a list containing references to its child nodes
 (empty if the node is a leaf).
 
-.. figure:: figures/tree_overview.png
-   :height: 490 px
-   :width: 460 px
-   :scale: 100 %
-   :alt: NEAT structure overview
+.. figure:: figures/NEATdocs_trees.png
+   :height: 310 px
+   :width: 742 px
+   :scale: 65 %
+   :alt: NEAT trees overview
 
-   **Figure 2.** Layout of a NEAT tree. **A:** Each NEAT tree consists of corresponding nodes.
-   **B:** A tree contains a root node attribute, and each node has a parent node,
+   **Figure 2.** Layout of a NEAT tree. **Left:** Each NEAT tree consists of corresponding nodes,
+   and contains a root node attribute. Each node then has a parent node,
    an index and a list of child nodes.
+   **Right:** For morphological trees, the nodes represent cylindrical section of dendrite,
+   whereas for compartmental trees they represent individual compartments. 
 
 Audience
 --------
@@ -98,7 +97,8 @@ History
 NEAT was born in April 2018. The original version was designed and written by
 Willem Wybo, based on code by Benjamin Torben-Nielsen. With help of Jakob
 Jordan and Benjamin Ellenberger, NEAT became an installable python package with
-documentation website.
+documentation website. Dennis Terhorst and Jessica Mitchell have been key in 
+integrating NEAT into the NEST Initiative's set of tools.
 
 Contributors are listed in :doc:`credits. <credits>`
 
