@@ -557,6 +557,7 @@ class PhysTree(MorphTree):
                 if g_s_distr is not None
                 else 0.0
             )
+            assert int(np.sign(g_s)) != -1
             node.set_physiology(c_m, r_a, g_s)
 
     @comptree_removal_decorator
@@ -588,6 +589,7 @@ class PhysTree(MorphTree):
         for node in self.convert_node_arg_to_nodes(node_arg):
             g_l = self._distr2Float(g_l_distr, node, argname="`g_l_distr`")
             e_l = self._distr2Float(e_l_distr, node, argname="`e_l_distr`")
+            assert int(np.sign(g_l)) != -1
             node._add_current("L", g_l, e_l)
 
     @comptree_removal_decorator
@@ -631,6 +633,7 @@ class PhysTree(MorphTree):
         for node in self.convert_node_arg_to_nodes(node_arg):
             g_max = self._distr2Float(g_max_distr, node, argname="`g_max_distr`")
             e_rev = self._distr2Float(e_rev_distr, node, argname="`e_rev_distr`")
+            assert int(np.sign(g_max)) != -1
             node._add_current(channel_name, g_max, e_rev)
 
     def get_channels_in_tree(self):
