@@ -856,29 +856,19 @@ class PhysTree(MorphTree):
             The location corresponding to the compartments of the finite
             difference approximation
         """
-
-        # create the list of compartment locations for FD approximation
-        # locs = []
-        # for node in self:
-        #     if self.is_root(node):
-        #         locs.append(
-        #             MorphLoc((node.index, 0.5), self, set_as_comploc=set_as_comploc)
-        #         )
-        #     else:
-        #         n_comp = np.ceil(node.L / dx_max).astype(int)
-
-        #         for cc in range(1, n_comp + 1):
-        #             new_loc = MorphLoc(
-        #                 (node.index, cc / n_comp), self, set_as_comploc=set_as_comploc
-        #             )
-        #             locs.append(new_loc)
-
         locs = self.distribute_locs_finite_diff(dx_max=dx_max, name=name)
 
         aux_tree = self.create_new_tree(locs, new_tree=PhysTree())
         fd_tree = self.create_compartment_tree(locs)
 
-        for ii, (fd_node, aux_node, loc) in enumerate(zip(fd_tree, aux_tree, locs)):
+        fd_nodes = fd_tree.nodes
+        aux_nodes = aux_tree.nodes
+
+        for ii in range(len(locs)):
+            fd_node = fd_nodes[ii]
+            aux_node = aux_nodes[ii]
+            loc = locs[ii]
+
             assert aux_node.content["loc idx"] == fd_node.loc_idx
 
             # unit conversion [um] -> [cm]
@@ -899,7 +889,6 @@ class PhysTree(MorphTree):
             fd_node.currents = {
                 chan: (surf * g, e) for chan, (g, e) in aux_node.currents.items()
             }
-
             for chan in aux_node.currents:
                 if chan not in fd_tree.channel_storage and chan in self.channel_storage:
                     fd_tree.channel_storage[chan] = copy.deepcopy(
@@ -934,7 +923,11 @@ class PhysTree(MorphTree):
                         fd_parent.currents[chan] = (0.0, e_parent)
 
         # set concentration mechanisms in separate pass
-        for ii, (fd_node, aux_node, loc) in enumerate(zip(fd_tree, aux_tree, locs)):
+        for ii in range(len(locs)):
+            fd_node = fd_nodes[ii]
+            aux_node = aux_nodes[ii]
+            loc = locs[ii]
+
             for ion in aux_node.concmechs:
                 ion_factors_aux = 0.0
                 ion_factors_fd = 0.0

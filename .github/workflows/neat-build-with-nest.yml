@@ -57,6 +57,17 @@ jobs:
         run: |
           pip install setuptools
 
+      # Install Cython conditionally based on nest_branch
+      - name: Install Cython 3.0.0 for NEST v3.8
+        if: ${{ matrix.nest_branch == 'v3.8' }}
+        run: |
+          pip install cython==3.0.0
+
+      - name: Install latest Cython for other NEST branches
+        if: ${{ matrix.nest_branch != 'v3.8' }}
+        run: |
+          pip install cython
+
       # Install NEST simulator
       - name: NEST simulator
         run: |
