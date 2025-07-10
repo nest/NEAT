@@ -156,7 +156,7 @@ html_theme_options = {
     # 'google_analytics_account': 'UA-XXXXX',
     # Specify a base_url used to generate sitemap.xml. If not
     # specified, then no sitemap will be built.
-    "base_url": "https://neatdend.readthedocs.io/en/latest/",
+    "base_url": "https://nest-neat.readthedocs.io/en/latest/",
     "html_minify": False,
     "html_prettify": False,
     "css_minify": True,
@@ -166,7 +166,7 @@ html_theme_options = {
     "theme_color": "ff6633",
     "master_doc": False,
     # Set the repo location to get a badge with stats
-    "repo_url": "https://github.com/unibe-cns/NEAT",
+    "repo_url": "https://github.com/nest/NEAT",
     "repo_name": "NEAT",
     "nav_links": [{"href": "index", "internal": True, "title": "Docs home"}],
     # Visible levels of the global TOC; -1 means unlimited
