@@ -47,6 +47,14 @@ class TestJaxley:
         jt = JaxleySimTree(self.tree)
         jcell = jt.init_model("multichannel_test")
 
+        jt.add_AMPA_synapse((1,.5))
+        jt.set_spiketrain(0, [10.], 1.)
+        res = jt.run()
+
+        import matplotlib.pyplot as pl
+        pl.plot(res.T)
+        pl.show()
+
         jct = JaxleyCompartmentTree(self.ctree)
         jcompcell = jt.init_model("multichannel_test")
 

@@ -82,7 +82,7 @@ def parse_cmd_args(path_neat):
     )
     parser.add_argument(
         "--jaxleyresource",
-        default=os.path.join(path_neat, "simulations/nest/default_syns.nestml"),
+        default=os.path.join(path_neat, "simulations/jaxley/default_syns.py"),
         help="Path to directory containing additional jaxley mechanisms "
         "(e.g. synapses) that will be combined together with the "
         "generated ion channel mod files.\n"
@@ -126,6 +126,7 @@ def main():
             simulators=cmd_args.simulator,
             path_neuronresource=cmd_args.neuronresource,
             path_nestresource=cmd_args.nestresource,
+            path_jaxleyresource=cmd_args.jaxleyresource,
         )
     elif cmd_args.action == "list":
         _list_models(path_neat=path_neat, simulators=cmd_args.simulator)

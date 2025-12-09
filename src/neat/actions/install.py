@@ -275,6 +275,7 @@ from typing import Dict, Optional
 import jax.numpy as jnp
 from jax.lax import select
 from jaxley.channels import Channel
+from jaxley.synapses.synapse import Synapse
 from jaxley.solver_gate import (
     exponential_euler,
     save_exp,
@@ -284,6 +285,13 @@ from jaxley.solver_gate import (
 
 
 """
+    if path_jaxleyresource is not None:
+        with open(path_jaxleyresource, 'r') as file:
+            resourcestr = file.read()
+        resourcestr = resourcestr.split("class", 1)[1]
+
+        filestr += 'class' + resourcestr
+
     for chan in channels:
         print(" - writing .jaxley code for:", chan.__class__.__name__)
         channelstr = chan.write_jaxley_code()

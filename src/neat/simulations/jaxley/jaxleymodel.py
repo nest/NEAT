@@ -6,7 +6,7 @@ import copy
 import importlib
 
 from ...trees.phystree import PhysTree, PhysNode
-from ...trees.morphtree import MorphTree
+from ...trees.morphtree import MorphTree, MorphLoc
 from ...trees.compartmenttree import CompartmentTree
 from ...factorydefaults import DefaultPhysiology
 
@@ -78,7 +78,7 @@ def load_jaxley_model(name):
             f"The Jaxley model named '{name}' is not installed. "
             f"Run 'neatmodels -h' in the terminal for help on "
             f"installing new Jaxley models with NEAT. "
-            f"Installed models will be in '{path}'."
+            f"Installed models will be in '{jx_path}'."
         )
 
 
@@ -215,9 +215,8 @@ class JaxleySimTree(PhysTree):
         """
         return JaxleySimNode(node_index, p3d=p3d)
 
-
     def init_model(
-        self, model_name, dt=0.025, t_calibrate=0.0, v_init=-75.0, factor_lambda=1.0, pprint=False
+        self, model_name, dt=0.025, t_calibrate=0.0, t_max=100., v_init=-75.0, factor_lambda=1.0, pprint=False
     ):
         """
         Initialize hoc-objects to simulate the neuron model implemented by this
@@ -240,9 +239,20 @@ class JaxleySimTree(PhysTree):
         pprint: bool (default ``False``)
             Whether or not to print info on the NEURON model's creation
         """
+        # simulation control
+        self.sim_control = {
+            'dt': dt,
+            't_calibrate': t_calibrate,
+            't_max': t_max,
+        }
+        self.model_name = model_name
+        self.syn_locs = []
+        self.syn_models = []
+
         # simple tree copy
         aux_tree = MorphTree(self)
         aux_tree.reset_indices()
+        self.index_map = {n_orig.index: n_aux.index-1 for n_orig, n_aux in zip(self, aux_tree)}
 
         jx_channels = {
             chan: eval(f"JX_MECH['{model_name}'].{chan}()") for chan in self.channel_storage
@@ -250,12 +260,37 @@ class JaxleySimTree(PhysTree):
         jx_channels['L'] = Leak()
 
         branches = [node._make_branch(jx_channels) for node in self]
-        parents = [aux_node.parent_node.index if not aux_tree.is_root(aux_node) else -1 for aux_node in aux_tree]
+        parents = [aux_node.parent_node.index-1 if not aux_tree.is_root(aux_node) else -1 for aux_node in aux_tree]
 
-        cell = jx.Cell(branches, parents)
+        self.cell = jx.Cell(branches, parents)
 
-        return cell
+        return self.cell
+    
+    def add_AMPA_synapse(self, loc):
+        synapse = JX_MECH[f'{self.model_name}'].AMPASynapse()
+        self.syn_locs.append(MorphLoc(loc, self))
+        self.syn_models.append(synapse)
 
+    def set_spiketrain(self, syn_index, syn_weight, spike_times):
+        self.syn_models[syn_index].set_spiketrain(spike_times, weight=syn_weight, **self.sim_control)
+
+    def run(self):
+        for loc, syn in zip(self.syn_locs, self.syn_models):
+            breakpoint()
+            self.cell.branch(
+                self.index_map[loc['node']]
+            ).loc(
+                loc['x']
+            ).insert(syn)
+
+        self.cell.delete_recordings()
+        self.cell.branch(0).loc(0.0).record("v")
+
+        current = jx.step_current(i_delay=1.0, i_dur=1.0, i_amp=0.0, delta_t=self.sim_control['dt'], t_max=self.sim_control['t_max'])
+        self.cell.branch(0).loc(0.0).stimulate(current)
+
+        res = jx.integrate(self.cell, delta_t=self.sim_control['dt'])
+        return res 
 
 class JaxleyCompartmentNode(JaxleySimNode):
     """
@@ -271,6 +306,7 @@ class JaxleyCompartmentNode(JaxleySimNode):
 
     def _make_branch(self, pprint=False):
         return super()._make_branch(dx_max=None, factorlambda=1, pprint=False)
+
 
 class JaxleyCompartmentTree(JaxleySimTree):
     """
