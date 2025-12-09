@@ -60,7 +60,7 @@ def parse_cmd_args(path_neat):
         "-s",
         "--simulator",
         nargs="*",
-        choices=["neuron", "nest"],
+        choices=["neuron", "nest", "jaxley"],
         default=["neuron"],
         help="The simulators to which the action is applied. \n" "Default is 'neuron'",
     )
@@ -75,8 +75,16 @@ def parse_cmd_args(path_neat):
     parser.add_argument(
         "--nestresource",
         default=os.path.join(path_neat, "simulations/nest/default_syns.nestml"),
-        help="Path to directory containing additional .mod-file mechanisms "
+        help="Path to directory containing additional .nestml-file mechanisms "
         "(e.g. synapses) that will be compiled together with the "
+        "generated ion channel mod files.\n"
+        "Only used when the [action] is 'install'.",
+    )
+    parser.add_argument(
+        "--jaxleyresource",
+        default=os.path.join(path_neat, "simulations/nest/default_syns.nestml"),
+        help="Path to directory containing additional jaxley mechanisms "
+        "(e.g. synapses) that will be combined together with the "
         "generated ion channel mod files.\n"
         "Only used when the [action] is 'install'.",
     )

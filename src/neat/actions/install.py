@@ -254,13 +254,53 @@ def _compile_nest(model_name, path_neat, channels, path_nestresource=None, ions=
     )
 
 
+def _compile_jaxley(model_name, path_neat, channels, path_jaxleyresource=None):
+
+    # combine `model_name` with the neuron compilation path
+    path_for_jaxley_compilation = os.path.join(
+        path_neat, "simulations/jaxley/tmp/"
+    )
+
+    jaxley_file_path = os.path.join(
+        path_for_jaxley_compilation, f"{model_name}.py"
+    )
+
+    print(f"--- writing channels to \n" f" > {jaxley_file_path}")
+    os.makedirs(path_for_jaxley_compilation, exist_ok=True)
+
+
+    filestr = """
+from typing import Dict, Optional
+
+import jax.numpy as jnp
+from jax.lax import select
+from jaxley.channels import Channel
+from jaxley.solver_gate import (
+    exponential_euler,
+    save_exp,
+    solve_gate_exponential,
+    solve_inf_gate_exponential,
+)
+
+
+"""
+    for chan in channels:
+        print(" - writing .jaxley code for:", chan.__class__.__name__)
+        channelstr = chan.write_jaxley_code()
+        filestr += channelstr
+
+    with open(jaxley_file_path, "w") as file:
+        file.write(filestr)
+
+
 def _install_models(
     model_name,
     path_neat,
     channel_path_arg,
-    simulators=["neuron", "nest"],
+    simulators=["neuron", "nest", "jaxley"],
     path_nestresource=None,
     path_neuronresource=None,
+    path_jaxleyresource=None,
 ):
     """
     Compile a set of ion channels models specified by [channel_path_arg]
@@ -297,4 +337,9 @@ def _install_models(
     if "nest" in simulators:
         _compile_nest(
             model_name, path_neat, channels, path_nestresource=path_nestresource
+        )
+    
+    if "jaxley" in simulators:
+        _compile_jaxley(
+            model_name, path_neat, channels, path_jaxleyresource=path_jaxleyresource
         )

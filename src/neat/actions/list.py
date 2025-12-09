@@ -23,7 +23,7 @@ import os
 import glob
 
 
-def _list_models(path_neat, simulators=["nest", "neuron"], pprint=True):
+def _list_models(path_neat, simulators=["nest", "neuron", "jaxley"], pprint=True):
     """
     Get (and print) a dictionary containing all installed model
 
@@ -49,11 +49,16 @@ def _list_models(path_neat, simulators=["nest", "neuron"], pprint=True):
     if "neuron" in simulators:
         path_neuron = os.path.join(path_neat, "simulations/", "neuron/tmp/*/")
 
-        print(path_neuron)
-
         for file_path in glob.glob(path_neuron):
             file_name = os.path.basename(os.path.normpath(file_path))
             models["neuron"].append(file_name)
+
+    if "jaxley" in simulators:
+        path_jaxley = os.path.join(path_neat, "simulations/", "jaxley/tmp/*")
+
+        for file_path in glob.glob(path_jaxley):
+            file_name = os.path.basename(os.path.normpath(file_path)).replace(".py", "")
+            models["jaxley"].append(file_name)
 
     if pprint:
         print("\n------- installed models --------")
