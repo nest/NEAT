@@ -15,6 +15,7 @@ report/
 # ignore installed models
 src/neat/simulations/nest/tmp/
 src/neat/simulations/neuron/tmp/
+src/neat/simulations/jaxley/tmp/
 
 # cython generated
 neat/simulations/netsim.cpp

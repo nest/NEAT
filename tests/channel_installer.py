@@ -28,7 +28,7 @@ except ImportError as e:
 import os
 import subprocess
 
-from neat import load_neuron_model, load_nest_model
+from neat import load_neuron_model, load_nest_model, load_jaxley_model
 
 
 def load_or_install_neuron_test_channels():
@@ -85,3 +85,34 @@ def load_or_install_nest_test_channels():
             ]
         )
         load_nest_model("multichannel_test")
+
+
+def load_or_install_jaxley_test_channels():
+    """
+    neatmodels install multichannel_test -s jaxley -p channelcollection_for_tests.py
+    """
+    channel_file = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "channelcollection_for_tests.py")
+    )
+    try:
+        # load_jaxley_model() calls will raise a RuntimeError is a compiled model
+        # is loaded multiple times
+        try:
+            # raises FileNotFoundError if not compiled
+            load_jaxley_model("multichannel_test")
+        except FileNotFoundError:
+            subprocess.call(
+                [
+                    "neatmodels",
+                    "install",
+                    "multichannel_test",
+                    "-s",
+                    "jaxley",
+                    "-p",
+                    channel_file,
+                ]
+            )
+            load_jaxley_model("multichannel_test")
+    except RuntimeError as e:
+        # the neuron model "multichannel_test" has already been loaded
+        pass

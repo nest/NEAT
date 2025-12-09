@@ -383,7 +383,6 @@ class IonChannel(object):
         except KeyError:
             warnings.warn("No default reversal potential defined.")
 
-        # self._lambdify_channel()
         self.set_default_params(**kwargs)
 
     def __getstate__(self):
@@ -1262,7 +1261,7 @@ class IonChannel(object):
 
     def _print_jaxley_pycode(self, expr):
         pstr = sp.printing.pycode(expr)
-        pstr = pstr.replace("match.exp", "save_exp")
+        pstr = pstr.replace("math.exp", "save_exp")
         pstr = pstr.replace("math.", "jnp.")
         return pstr 
 
@@ -1284,20 +1283,19 @@ class {cname}(Channel):
         self.current_is_in_mA_per_cm2 = True
         super().__init__(name)
         self.channel_params = {{
-            f'{{self.prefix}}gbar_{cname}': 1e-4,
-            f'erev_{cname}': {e},
+            f'{{self.prefix}}g{cname}': 1e-4,
+            f'{{self.prefix}}e{cname}': {e},
         }}
         self.channel_states = {{ 
             {",\n            ".join(
                 f"f'{{self.prefix}}{var}':  0.0" for var in sv
             )} 
         }}
+        self.current_name = "i_{self.ion}"
         
-
     @property
     def prefix(self):
         return f'{{self._name}}_'
-
 """
         channelstr += f"""
     def update_states(
@@ -1310,7 +1308,7 @@ class {cname}(Channel):
         v = voltages
         { 
             "\n        ".join([
-                f"{var} = u[f'{{self.prefix}}_{var}']" for var in sv
+                f"{var} = u[f'{{self.prefix}}{var}']" for var in sv
             ])
         }
 """
@@ -1333,10 +1331,10 @@ class {cname}(Channel):
         )
 """
         channelstr += f"""
-        return {{ 
+        return {{
             {",\n            ".join(
                 f"f'{{self.prefix}}{var}': {var}_new" for var in sv
-            )} 
+            )}
         }}
 """
     
@@ -1344,15 +1342,15 @@ class {cname}(Channel):
     def compute_current(
         self, u: Dict[str, jnp.ndarray], voltages, params: Dict[str, jnp.ndarray]
     ):
-        gbar = params[f'{{self.prefix}}gbar_{cname}']
-        erev = params[f'{{self.prefix}}erev_{cname}']
+        gbar = params[f'{{self.prefix}}g{cname}']
+        erev = params[f'{{self.prefix}}e{cname}']
         v = voltages
         { 
             "\n        ".join([
-                f"{var} = u[f'{{self.prefix}}_{var}']" for var in sv
+                f"{var} = u[f'{{self.prefix}}{var}']" for var in sv
             ])
         }
-        return gbar * {self._print_jaxley_pycode(self.p_open)} * (v - erev)
+        return gbar * ({self._print_jaxley_pycode(self.p_open)}) * (v - erev)
 """
         channelstr += f"""
     def init_state(self, states, voltages, params, delta_t):
@@ -1368,5 +1366,4 @@ class {cname}(Channel):
             )} 
         }}
 """
-    
         return channelstr
