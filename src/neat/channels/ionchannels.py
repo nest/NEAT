@@ -1258,3 +1258,115 @@ class IonChannel(object):
 
         fh.close()
         fcc.close()
+    
+
+    def _print_jaxley_pycode(self, expr):
+        pstr = sp.printing.pycode(expr)
+        pstr = pstr.replace("match.exp", "save_exp")
+        pstr = pstr.replace("math.", "jnp.")
+        return pstr 
+
+    def write_jaxley_code(self, 
+        v_comp=-75.0,
+        g=0.0,
+        e=None,
+    ):
+        cname = self.__class__.__name__
+        sv = [str(svar) for svar in self.ordered_statevars]
+        cs = [str(conc) for conc in self.conc]
+        e = self._get_reversal(e)
+
+        channelstr = f"""
+class {cname}(Channel):
+    # Automatically generated using neat
+
+    def __init__(self, name=None):
+        self.current_is_in_mA_per_cm2 = True
+        super().__init__(name)
+        self.channel_params = {{
+            f'{{self.prefix}}gbar_{cname}': 1e-4,
+            f'erev_{cname}': {e},
+        }}
+        self.channel_states = {{ 
+            {",\n            ".join(
+                f"f'{{self.prefix}}{var}':  0.0" for var in sv
+            )} 
+        }}
+        
+
+    @property
+    def prefix(self):
+        return f'{{self._name}}_'
+
+"""
+        channelstr += f"""
+    def update_states(
+        self,
+        u: Dict[str, jnp.ndarray],
+        dt: float,
+        voltages: float,
+        params: Dict[str, jnp.ndarray],
+    ):
+        v = voltages
+        { 
+            "\n        ".join([
+                f"{var} = u[f'{{self.prefix}}_{var}']" for var in sv
+            ])
+        }
+"""
+    # substitution for common neuron names
+        repl_pairs = [(str(c), str(c) + "i") for c in self.conc]
+        for var, svar in zip(sv, self.ordered_statevars):
+            vi = self._print_jaxley_pycode(self.varinf[svar])#, assign_to=f"{var}_inf")
+            ti = self._print_jaxley_pycode(self.tauinf[svar])#, assign_to=f"tau_{var}")
+            for repl_pair in repl_pairs:
+                vi = vi.replace(*repl_pair)
+                ti = ti.replace(*repl_pair)
+
+            channelstr += f"""
+        # advance state variable {var}
+        {var}_new = solve_inf_gate_exponential(
+            {svar}, 
+            dt, 
+            {vi}, 
+            {ti}
+        )
+"""
+        channelstr += f"""
+        return {{ 
+            {",\n            ".join(
+                f"f'{{self.prefix}}{var}': {var}_new" for var in sv
+            )} 
+        }}
+"""
+    
+        channelstr += f"""
+    def compute_current(
+        self, u: Dict[str, jnp.ndarray], voltages, params: Dict[str, jnp.ndarray]
+    ):
+        gbar = params[f'{{self.prefix}}gbar_{cname}']
+        erev = params[f'{{self.prefix}}erev_{cname}']
+        v = voltages
+        { 
+            "\n        ".join([
+                f"{var} = u[f'{{self.prefix}}_{var}']" for var in sv
+            ])
+        }
+        return gbar * {self._print_jaxley_pycode(self.p_open)} * (v - erev)
+"""
+        channelstr += f"""
+    def init_state(self, states, voltages, params, delta_t):
+        v = voltages
+        { '\n        '.join([
+            f'{var} = {self._print_jaxley_pycode(self.varinf[svar])}' \
+                for var, svar in zip(sv, self.ordered_statevars)
+            ]) 
+        }
+        return {{ 
+            {",\n            ".join(
+                f"f'{{self.prefix}}{var}': {var}" for var in sv
+            )} 
+        }}
+"""
+    
+        return channelstr
