@@ -25,8 +25,10 @@ import numpy as np
 import os
 import ast
 import warnings
+from functools import reduce
 
 from ..factorydefaults import DefaultPhysiology
+
 
 # CONC_DICT = {
 #     'na': 10.,  # mM
@@ -62,6 +64,34 @@ class IfExpVisitor(ast.NodeVisitor):
         return_node = self.ifexp_node
         self.ifexp_node = None
         return return_node
+    
+
+
+class BoolOpToJnpTransformer(ast.NodeTransformer):
+    def visit_BoolOp(self, node: ast.BoolOp):
+        # First, recursively transform child nodes
+        self.generic_visit(node)
+
+        if isinstance(node.op, ast.And):
+            func_name = "logical_and"
+        elif isinstance(node.op, ast.Or):
+            func_name = "logical_or"
+        else:
+            return node
+
+        # Reduce n-ary BoolOp into nested binary calls
+        def combine(left, right):
+            return ast.Call(
+                func=ast.Attribute(
+                    value=ast.Name(id="jnp", ctx=ast.Load()),
+                    attr=func_name,
+                    ctx=ast.Load(),
+                ),
+                args=[left, right],
+                keywords=[],
+            )
+
+        return reduce(combine, node.values)
 
 
 class _func(object):
@@ -1259,10 +1289,49 @@ class IonChannel(object):
         fcc.close()
     
 
-    def _print_jaxley_pycode(self, expr):
-        pstr = sp.printing.pycode(expr)
+    def _create_jaxley_funcstr(self, code_str, n_spaces=0, indent=4):
+        """
+        This function is used to recursively expand if... else... statements
+        across multiple lines, as by default the single line version is printed
+        by `sympy.pycode()` and `ast.unparse()`
+        """
+        tree = ast.parse(code_str)
+        iev = IfExpVisitor()
+        ifexp = iev.find_IfExp_node(tree)
+        transformer = BoolOpToJnpTransformer()
+# new_tree = transformer.visit(tree)
+        if ifexp is not None:
+            # sanity check
+            assert iev.find_IfExp_node(ifexp.test) is None
+            # if test is True
+            cond_1_str = self._create_jaxley_funcstr(
+                ast.unparse(ifexp.body), n_spaces=n_spaces, indent=n_spaces + indent
+            )
+            # if test is False
+            cond_0_str = self._create_jaxley_funcstr(
+                ast.unparse(ifexp.orelse), n_spaces=n_spaces, indent=n_spaces + indent
+            )
+            code_str = f"""jnp.where(
+                {ast.unparse(transformer.visit(ifexp.test))},
+            {cond_1_str},
+            {cond_0_str},
+            )"""
+        else:
+            try:
+                code_str = \
+                    " " * indent + self._replace_jaxley_patterns(code_str)
+            except TypeError as e:
+                print(e)
+        return code_str
+
+    def _replace_jaxley_patterns(self, pstr):
         pstr = pstr.replace("math.exp", "save_exp")
         pstr = pstr.replace("math.", "jnp.")
+        return pstr
+
+    def _print_jaxley_pycode(self, expr):
+        pstr = sp.printing.pycode(expr)
+        pstr = self._replace_jaxley_patterns(pstr)
         return pstr 
 
     def write_jaxley_code(self, 
@@ -1311,15 +1380,21 @@ class {cname}(Channel):
                 f"{var} = u[f'{{self.prefix}}{var}']" for var in sv
             ])
         }
-"""
-    # substitution for common neuron names
+"""     
+        
+        # if self.__class__.__name__ == "NaTa_t":
+        # breakpoint()
+        # substitution for common neuron names
         repl_pairs = [(str(c), str(c) + "i") for c in self.conc]
         for var, svar in zip(sv, self.ordered_statevars):
-            vi = self._print_jaxley_pycode(self.varinf[svar])#, assign_to=f"{var}_inf")
-            ti = self._print_jaxley_pycode(self.tauinf[svar])#, assign_to=f"tau_{var}")
+            vi = sp.printing.pycode(self.varinf[svar])#, assign_to=f"{var}_inf")
+            ti = sp.printing.pycode(self.tauinf[svar])#, assign_to=f"tau_{var}")
             for repl_pair in repl_pairs:
                 vi = vi.replace(*repl_pair)
                 ti = ti.replace(*repl_pair)
+            
+            vi = self._create_jaxley_funcstr(vi)
+            ti = self._create_jaxley_funcstr(ti)
 
             channelstr += f"""
         # advance state variable {var}
@@ -1327,7 +1402,7 @@ class {cname}(Channel):
             {svar}, 
             dt, 
             {vi}, 
-            {ti}
+            {ti},
         )
 """
         channelstr += f"""
@@ -1356,7 +1431,7 @@ class {cname}(Channel):
     def init_state(self, states, voltages, params, delta_t):
         v = voltages
         { '\n        '.join([
-            f'{var} = {self._print_jaxley_pycode(self.varinf[svar])}' \
+            f'{var} = {self._create_jaxley_funcstr(sp.printing.pycode(self.varinf[svar]))}' \
                 for var, svar in zip(sv, self.ordered_statevars)
             ]) 
         }
