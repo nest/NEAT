@@ -272,8 +272,8 @@ def _compile_jaxley(model_name, path_neat, channels, path_jaxleyresource=None):
     filestr = """
 from typing import Dict, Optional
 
+import jax
 import jax.numpy as jnp
-from jax.lax import select
 from jaxley.channels import Channel
 from jaxley.synapses.synapse import Synapse
 from jaxley.solver_gate import (

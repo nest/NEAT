@@ -45,10 +45,10 @@ class TestJaxley:
         self.load_ball()
 
         jt = JaxleySimTree(self.tree)
-        jcell = jt.init_model("multichannel_test")
+        jcell = jt.init_model("multichannel_test", t_max=1000)
 
         jt.add_AMPA_synapse((1,.5))
-        jt.set_spiketrain(0, [10.], 1.)
+        jt.set_spiketrain(0, 1., [200.])
         res = jt.run()
 
         import matplotlib.pyplot as pl

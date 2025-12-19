@@ -276,17 +276,23 @@ class JaxleySimTree(PhysTree):
 
     def run(self):
         for loc, syn in zip(self.syn_locs, self.syn_models):
-            breakpoint()
             self.cell.branch(
                 self.index_map[loc['node']]
             ).loc(
                 loc['x']
             ).insert(syn)
+        # for loc, syn in zip(self.syn_locs, self.syn_models):
+        #     self.cell.branch(
+        #         self.index_map[loc['node']]
+        #     ).loc(
+        #         loc['x']
+        #     ).insert(JX_MECH["multichannel_test"].Bla())
 
         self.cell.delete_recordings()
-        self.cell.branch(0).loc(0.0).record("v")
+        self.cell.branch(0).loc(0.0).record()
+        self.cell.record("AMPASynapse_x_r")
 
-        current = jx.step_current(i_delay=1.0, i_dur=1.0, i_amp=0.0, delta_t=self.sim_control['dt'], t_max=self.sim_control['t_max'])
+        current = jx.step_current(i_delay=100., i_dur=10.0, i_amp=10.0, delta_t=self.sim_control['dt'], t_max=self.sim_control['t_max'])
         self.cell.branch(0).loc(0.0).stimulate(current)
 
         res = jx.integrate(self.cell, delta_t=self.sim_control['dt'])
