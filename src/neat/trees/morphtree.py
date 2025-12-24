@@ -2624,9 +2624,11 @@ class MorphTree(STree):
             self._set_node_colors_from_rng(startnode, rng)
             self.node_colors = None
         else:
-            raise ValueError("Unknown scheme for node coloring, choose from 'iterator', 'depth' or 'random'")
+            raise ValueError(
+                "Unknown scheme for node coloring, choose from 'iterator', 'depth' or 'random'"
+            )
         self.node_color = None
-    
+
     def _set_node_colors_from_iterator(self, node):
         node.content["color"] = self.node_color[0]
         if self.is_leaf(node):
@@ -2634,7 +2636,7 @@ class MorphTree(STree):
         for cnode in node.child_nodes:
             self._set_node_colors_from_iterator(cnode)
 
-    def _set_node_colors_from_rng(self, node, rng): 
+    def _set_node_colors_from_rng(self, node, rng):
         node.content["color"] = self.node_colors[int(self.node_color[0])]
         if self.is_leaf(node):
             self.node_color[0] += 1.0
@@ -2648,7 +2650,12 @@ class MorphTree(STree):
             max_dist = []
             for cnode in enumerate(node.child_nodes):
                 st_leafs = self.get_leafs(cnode)
-                max_d = max([self.path_length((cnode.index, 0.0), (leaf.index, 1.0)) for leaf in st_leafs])
+                max_d = max(
+                    [
+                        self.path_length((cnode.index, 0.0), (leaf.index, 1.0))
+                        for leaf in st_leafs
+                    ]
+                )
                 max_dist.append(max_d)
             # sort child nodes based on min distance to leafs
             sorted_inds = np.argsort(max_dist)
@@ -2661,7 +2668,6 @@ class MorphTree(STree):
             self.node_color[0] += 1.0
         else:
             raise RuntimeError("This code should not be reachable")
-
 
     def get_x_values(self, locs):
         """
