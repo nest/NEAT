@@ -412,16 +412,16 @@ class STree(object):
         for cnode in node.child_nodes:
             self._gather_nodes(cnode, node_list=node_list)
 
-    def get_leafs(self):
+    def get_leafs(self, node=None):
         """
         Get all leaf nodes in the tree.
 
         Parameters
         ----------
-            recompute_flag: bool
-                Whether to force recomputing the leaf list. Defaults to 1.
+            node: `neat.SNode` (optional)
+                The starting node. Defaults to the root
         """
-        return [node for node in self if self.is_leaf(node)]
+        return [n for n in self.__iter__(node) if self.is_leaf(n)]
 
     def set_leafs(self, illegal):
         raise AttributeError("`leafs` is a read-only attribute")

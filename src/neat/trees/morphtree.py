@@ -614,12 +614,18 @@ class MorphTree(STree):
         for cnode in node.get_child_nodes(skip_inds=skip_inds):
             self._gather_nodes(cnode, node_list=node_list, skip_inds=skip_inds)
 
-    def get_leafs(self):
+    def get_leafs(self, node=None):
         """
         Overloads the `get_leafs` of the parent class to return the leaf nodes
         in the corresponding active tree.
+
+        Parameters
+        ----------
+            node: `neat.SNode` (optional)
+                The starting node. Defaults to the root
         """
-        return [node for node in self if self.is_leaf(node)]
+        # return [node for node in self if self.is_leaf(node)]
+        return [n for n in self.__iter__(node) if self.is_leaf(n)]
 
     leafs = property(get_leafs)
 
@@ -2521,7 +2527,7 @@ class MorphTree(STree):
             self.store_locs(locs_, name=name)
         return locs_
 
-    def make_x_axis(self, dx=10.0, node_arg=None, loc_arg=None):
+    def make_x_axis(self, dx=10.0, node_arg=None, loc_arg=None, scheme="iterator"):
         """
         Create a set of locs suitable for serving as the x-axis for 1D plotting.
         The neurons is put on a 1D axis with a depth-first ordering.
@@ -2538,7 +2544,13 @@ class MorphTree(STree):
         loc_arg: list of locs or string
             if list of locs, these locs will be used as x-axis, if string, name
             of set of locs on the morphology that will be used as x-axis
-
+        scheme: str (default: 'iterator')
+                scheme for coloring the nodes. Options are:
+                'iterator': colors nodes in depth-first order
+                'depth': colors nodes based on distance to leafs
+                'random': colors nodes randomly
+            startnode: `neat.MorphNode` (optional)
+                node from which to start coloring. If None, starts from root
         """
         if loc_arg is None:
             # if comptree has not been set, create a basic one for plotting
@@ -2557,10 +2569,10 @@ class MorphTree(STree):
                     )
             # set the node colors for original and computational trees
             tempnode_orig = self._find_comp_node_from_root(nodes[0])
-            self.set_node_colors(tempnode_orig)
+            self.set_node_colors(tempnode_orig, scheme=scheme)
             with self.as_computational_tree:
                 tempnode_comp = self[tempnode_orig.index]
-                self.set_node_colors(tempnode_comp)
+                self.set_node_colors(tempnode_comp, scheme=scheme)
 
         else:
             if isinstance(loc_arg, list):
@@ -2583,29 +2595,73 @@ class MorphTree(STree):
             d_add += d2s[pinds[ii + 1]] - d2s[pinds[ii] + 1]
         self.xaxis = np.array(xaxis)
 
-    def set_node_colors(self, startnode=None):
+    def set_node_colors(self, startnode=None, scheme="iterator"):
         """
         Set the color code for the nodes for 1D plotting
 
         Parameters
         ----------
-            node: int or `neat.MorphNode`
-                index of the node or node whose subtree will be colored. Defaults
-                to the root
+            scheme: str (default: 'iterator')
+                scheme for coloring the nodes. Options are:
+                'iterator': colors nodes in depth-first order
+                'depth': colors nodes based on distance to leafs
+                'random': colors nodes randomly
+            startnode: `neat.MorphNode` (optional)
+                node from which to start coloring. If None, starts from root
         """
         if startnode == None:
             startnode = self.root
         for node in self:
             node.content["color"] = 0.0
         self.node_color = [0.0]  # trick to pass the pointer and not the number itself
-        self._set_node_colors_from_root(startnode)
-
-    def _set_node_colors_from_root(self, node):
+        if scheme == "iterator":
+            self._set_node_colors_from_iterator(startnode)
+        elif scheme == "depth":
+            self._set_node_colors_from_depth(startnode)
+        elif scheme == "random":
+            rng = np.random.default_rng()
+            self.node_colors = rng.permuted(np.arange(len(self.leafs)))
+            self._set_node_colors_from_rng(startnode, rng)
+            self.node_colors = None
+        else:
+            raise ValueError("Unknown scheme for node coloring, choose from 'iterator', 'depth' or 'random'")
+        self.node_color = None
+    
+    def _set_node_colors_from_iterator(self, node):
         node.content["color"] = self.node_color[0]
         if self.is_leaf(node):
             self.node_color[0] += 1.0
         for cnode in node.child_nodes:
-            self._set_node_colors_from_root(cnode)
+            self._set_node_colors_from_iterator(cnode)
+
+    def _set_node_colors_from_rng(self, node, rng): 
+        node.content["color"] = self.node_colors[int(self.node_color[0])]
+        if self.is_leaf(node):
+            self.node_color[0] += 1.0
+        for cnode in node.child_nodes:
+            self._set_node_colors_from_rng(cnode, rng)
+
+    def _set_node_colors_from_depth(self, node):
+        node.content["color"] = self.node_color[0]
+        if len(node.child_nodes) > 1:
+            # find leafs in subtree
+            max_dist = []
+            for cnode in enumerate(node.child_nodes):
+                st_leafs = self.get_leafs(cnode)
+                max_d = max([self.path_length((cnode.index, 0.0), (leaf.index, 1.0)) for leaf in st_leafs])
+                max_dist.append(max_d)
+            # sort child nodes based on min distance to leafs
+            sorted_inds = np.argsort(max_dist)
+            for ind in sorted_inds:
+                cnode = node.child_nodes[ind]
+                self._set_node_colors_from_depth(cnode)
+        elif len(node.child_nodes) == 1:
+            self._set_node_colors_from_depth(node.child_nodes[0])
+        elif self.is_leaf(node):
+            self.node_color[0] += 1.0
+        else:
+            raise RuntimeError("This code should not be reachable")
+
 
     def get_x_values(self, locs):
         """
