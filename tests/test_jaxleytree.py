@@ -3,7 +3,7 @@ import jaxley as jx
 
 import os
 
-from neat import PhysTree, JaxleySimTree, JaxleyCompartmentTree, CompartmentFitter
+from neat import PhysTree, JaxleySimTree, JaxleyCompartmentTree, NeuronSimTree, CompartmentFitter
 
 import channelcollection_for_tests as channelcollection
 import channel_installer
@@ -45,18 +45,28 @@ class TestJaxley:
         self.load_ball()
 
         jt = JaxleySimTree(self.tree)
-        jcell = jt.init_model("multichannel_test", t_max=1000)
+        jcell = jt.init_model("multichannel_test", t_max=200., t_calibrate=100.)
 
-        jt.add_AMPA_synapse((1,.5))
-        jt.set_spiketrain(0, 1., [200.])
-        res = jt.run()
+        jt.add_AMPA_synapse((1,0.))
+        jt.set_spiketrain(0, .001, [150.])
+        jres = jt.run()
+
+        # jct = JaxleyCompartmentTree(self.ctree)
+        # jcompcell = jt.init_model("multichannel_test")
+
+        nt = NeuronSimTree(self.tree)
+        nt.init_model(t_calibrate=100.)
+        
+        nt.add_double_exp_synapse((1,.5), .2, 3., 0.)
+        nt.set_spiketrain(0, .001, [150.])
+        nt.add_i_clamp((1,0.), 1., 10., 10.)
+        nres = nt.run(t_max=200.)
 
         import matplotlib.pyplot as pl
-        pl.plot(res.T)
+        pl.plot(nres['t'], nres['v_m'][0], c='r', label='neuron')
+        pl.plot(jres['t'], jres['v_m'][0], c='b', ls='--', label='jaxley')
         pl.show()
 
-        jct = JaxleyCompartmentTree(self.ctree)
-        jcompcell = jt.init_model("multichannel_test")
 
     # def test_jaxley_channels(self):
     #     self.load_ball()

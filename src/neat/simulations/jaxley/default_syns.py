@@ -13,7 +13,7 @@ from jaxley.solver_gate import (
 
 
 
-class NEATJaxleySynapse(Channel):
+class NEATJaxleySynapse(Synapse):
     """
     Compute syanptic current and update synapse state.
     """
@@ -27,38 +27,19 @@ class NEATJaxleySynapse(Channel):
     def prefix(self):
         return f'{self._name}_'
 
-    def set_spiketrain(self, spktms, dt=0.1, t_calibrate=0.0, t_max=100., weight=1.0):
-        maxidx = jnp.round(t_max / dt).astype(int)
-        calidx = jnp.round(t_calibrate / dt).astype(int)
-
-        spkidx = jnp.round(jnp.array(spktms) / dt).astype(int)
-        spkidx = spkidx[spkidx <= maxidx + 1]
-        spkidx += calidx
-
-        # self.cc = 0 # step index counter
-        self.spkidx = spkidx[1:]
-        print("Setting spiketrain:", self.spkidx)
-        self.channel_params["weight"] = weight
-        self.channel_states.update({
-            f"{self.prefix}cc": 0,
-            f"{self.prefix}next_spk": spkidx[0],
-        })
-
 
 class DoubleExpSynapse(NEATJaxleySynapse):
     def __init__(self, name = None, tau_r=.2, tau_d=3., e_r=0.):
         super().__init__(name)
-        self.channel_params = {
+        self.synapse_params = {
             f"{self.prefix}tau_r": tau_r, 
             f"{self.prefix}tau_d": tau_d, 
             f"{self.prefix}e_r": e_r,
             f"{self.prefix}weight": 0.0, # meant to be reset
         }
-        self.channel_states = {
+        self.synapse_states = {
             f"{self.prefix}x_r": 0.0,
             f"{self.prefix}x_d": 0.0,
-            f"{self.prefix}cc": 0,
-            f"{self.prefix}next_spk": 0,
         }
 
     def compute_propagators(self, delta_t, params):
@@ -70,56 +51,44 @@ class DoubleExpSynapse(NEATJaxleySynapse):
         p_d = jnp.exp(-delta_t / tau_d)
         return p_r, p_d, g_norm
 
-    def update_states(self, u, dt, voltages, params):
+    def update_states(self, states, delta_t, pre_voltage, post_voltage, params):
         """Return updated synapse state and current."""
         w = params[f'{self.prefix}weight']
-        x_r = u[f'{self.prefix}x_r']
-        x_d = u[f'{self.prefix}x_d']
-        # spkidx = u[f'{self.prefix}spkidx']
-        cc = u[f'{self.prefix}cc']
-        next_spk = u[f'{self.prefix}next_spk']
+        x_r = states[f'{self.prefix}x_r']
+        x_d = states[f'{self.prefix}x_d']
 
-        p_r, p_d, g_norm = self.compute_propagators(dt, params)
+        tau_r, tau_d = params[f'{self.prefix}tau_r'], params[f'{self.prefix}tau_d']
 
-        def branch1():
-            print("!! in spike branch !!")
-            n_x_r = x_r - g_norm * w
-            n_x_d = x_d + g_norm * w
-            # self.spkidx.delete(0)
-            n_cc = cc + 1
-            n_spk = next_spk + 1
-            # n_spkidx = self.spkidx[n_cc:]
-            return n_x_r, n_x_d, n_cc, n_spk
-        
-        def branch2():
-            n_cc = cc + 1
-            return x_r, x_d, n_cc, next_spk
+        p_r, p_d, g_norm = self.compute_propagators(delta_t, params)
 
-        # spike delivery
-        new_x_r, new_x_d, new_cc, new_spk = jax.lax.cond(
-            (cc == next_spk)[0],
-            # True,
-            branch1,
-            branch2,
+        # add the spikes to the conductance window, weight is contained in pre_voltage
+        pred = pre_voltage >= 1e-15
+        new_x_r = jnp.where(
+            pred,
+            x_r - g_norm * pre_voltage,
+            x_r
         )
+        new_x_d = jnp.where(
+            pred,
+            x_d + g_norm * pre_voltage,
+            x_d
+        )
+        # decay the conductance window
         new_x_r *= p_r
         new_x_d *= p_d
 
         return {
             f'{self.prefix}x_r': new_x_r, 
             f'{self.prefix}x_d': new_x_d,
-            # f'{self.prefix}spkidx': new_spkidx,
-            f'{self.prefix}cc': new_cc,
-            f'{self.prefix}next_spk': new_spk,
         }
 
-    def compute_current(self, u: Dict[str, jnp.ndarray], voltages, params: Dict[str, jnp.ndarray]):
+    def compute_current(self, states, pre_voltage, post_voltage, params):
         print(self.prefix)#, params)
         e_r = params[f'{self.prefix}e_r']
-        v = voltages
-        x_r = u[f'{self.prefix}x_r']
-        x_d = u[f'{self.prefix}x_d']
-        return (x_d - x_r) * (v - e_r)
+        v = post_voltage
+        x_r = states[f'{self.prefix}x_r']
+        x_d = states[f'{self.prefix}x_d']
+        return (x_d + x_r) * (v - e_r)
     
 
 class AMPASynapse(DoubleExpSynapse):

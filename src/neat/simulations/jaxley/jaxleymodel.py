@@ -11,6 +11,7 @@ from ...trees.compartmenttree import CompartmentTree
 from ...factorydefaults import DefaultPhysiology
 
 try:
+    import jax.numpy as jnp
     import jaxley as jx
     from jaxley.channels import Leak
 
@@ -186,15 +187,10 @@ class JaxleySimTree(PhysTree):
     """
 
     def __init__(self, arg=None, types=[1, 3, 4]):
-        # neuron storage
-        self.sections = {}
-        self.shunts = []
-        self.syns = []
-        self.iclamps = []
-        self.vclamps = []
-        self.vecstims = []
-        self.netcons = []
-        self.vecs = []
+        self.cell = None
+        self.pre_dummies = {}       
+        self.syn_locs = []
+        self.syn_models = []
         # simulation parameters
         self.dt = 0.1  # ms
         self.t_calibrate = 0.0  # ms
@@ -244,8 +240,10 @@ class JaxleySimTree(PhysTree):
             'dt': dt,
             't_calibrate': t_calibrate,
             't_max': t_max,
+            't_sim': t_calibrate + t_max,
         }
         self.model_name = model_name
+        self.pre_dummies = {}
         self.syn_locs = []
         self.syn_models = []
 
@@ -266,37 +264,78 @@ class JaxleySimTree(PhysTree):
 
         return self.cell
     
+    def delete_model(self):
+        """
+        Deletes all Jaxley objects created to simulate the model
+        implemented by this tree.
+        """
+        self.cell = None
+        self.pre_dummies = []
+        self.syn_locs = []
+        self.syn_models = []
+    
     def add_AMPA_synapse(self, loc):
         synapse = JX_MECH[f'{self.model_name}'].AMPASynapse()
         self.syn_locs.append(MorphLoc(loc, self))
         self.syn_models.append(synapse)
 
+    def add_GABA_synapse(self, loc):
+        synapse = JX_MECH[f'{self.model_name}'].GABASynapse()
+        self.syn_locs.append(MorphLoc(loc, self))
+        self.syn_models.append(synapse)
+
     def set_spiketrain(self, syn_index, syn_weight, spike_times):
-        self.syn_models[syn_index].set_spiketrain(spike_times, weight=syn_weight, **self.sim_control)
+        spike_times = jnp.array(spike_times) + self.sim_control['t_calibrate']
+        # create the pre synaptic dummy voltage representing weighted spikes
+        spks_v = jnp.zeros(int(self.sim_control['t_sim'] / self.sim_control['dt']) + 1)
+        spks_v = spks_v.at[(spike_times / self.sim_control['dt']).astype(int)].set(syn_weight)
+        # store the dummy cell and its 'spike' voltage
+        self.pre_dummies[syn_index] = (jx.Cell(), spks_v)
 
     def run(self):
-        for loc, syn in zip(self.syn_locs, self.syn_models):
-            self.cell.branch(
+        # create the network consisting of the pre dummies and the cell
+        net = jx.Network(
+            [
+                self.pre_dummies[ii][0] for ii in range(len(self.pre_dummies))
+            ] + [
+                self.cell
+            ]
+        )
+        # connect the synapses
+        cell_id = len(self.pre_dummies)
+        for ii, (loc, syn) in enumerate(zip(self.syn_locs, self.syn_models)):
+            # post cell synapse at correct location
+            post = net.cell(cell_id).branch(
                 self.index_map[loc['node']]
             ).loc(
                 loc['x']
-            ).insert(syn)
-        # for loc, syn in zip(self.syn_locs, self.syn_models):
-        #     self.cell.branch(
-        #         self.index_map[loc['node']]
-        #     ).loc(
-        #         loc['x']
-        #     ).insert(JX_MECH["multichannel_test"].Bla())
+            )
+            # clamp the pre dummy
+            net.cell(ii).clamp("v", self.pre_dummies[ii][1])
+            # select correct pre dummy
+            pre = net.cell(ii).branch(0).loc(0.0)
+            jx.connect(pre, post, syn)
 
-        self.cell.delete_recordings()
-        self.cell.branch(0).loc(0.0).record()
-        self.cell.record("AMPASynapse_x_r")
+        net.delete_recordings()
+        net.cell(cell_id).branch(0).loc(0.0).record()
 
-        current = jx.step_current(i_delay=100., i_dur=10.0, i_amp=10.0, delta_t=self.sim_control['dt'], t_max=self.sim_control['t_max'])
-        self.cell.branch(0).loc(0.0).stimulate(current)
+        current = jx.step_current(
+            i_delay=10.+self.sim_control['t_calibrate'], i_dur=10.0, i_amp=1.0, 
+            delta_t=self.sim_control['dt'], 
+            t_max=self.sim_control['t_sim'],
+        )
+        net.cell(cell_id).branch(0).loc(0.5).stimulate(current)
 
-        res = jx.integrate(self.cell, delta_t=self.sim_control['dt'])
+        res_raw = jx.integrate(net, delta_t=self.sim_control['dt'])
+        
+        i0 = int(self.sim_control['t_calibrate'] / self.sim_control['dt'])
+        # breakpoint()
+        res = {
+            't': jnp.arange(0, res_raw[0,i0:].shape[0]) * self.sim_control['dt'],
+            'v_m': res_raw[:,i0:],
+        }
         return res 
+    
 
 class JaxleyCompartmentNode(JaxleySimNode):
     """
