@@ -1197,6 +1197,7 @@ class CompartmentFitter(EquilibriumTree):
         ctree, locs = self.convert_fit_arg(fit_arg)
 
         # compute the equilibirum potentials at fit locations
+        # v_eqs_fit, conc_eqs_fit = self.calc_e_eq(locs)
         v_eqs_fit, conc_eqs_fit = self.calc_e_eq(locs)
 
         # set the equilibria
@@ -1205,7 +1206,19 @@ class CompartmentFitter(EquilibriumTree):
             ctree.set_conc_eq(ion, conc_eqs_fit[ion])
 
         # fit the leak
-        ctree.fit_e_leak()
+        # print("---")
+        ctree.fit_e_leak_()
+        # lll = []
+        # for n in ctree: lll.append(n.currents['L'])
+        # lll = np.array(lll)
+        # ctree.fit_e_leak()
+        # lll_ = []
+        # for n in ctree: lll_.append(n.currents['L'])
+        # lll_ = np.array(lll_)
+
+        # for e1, e2 in zip(lll, lll_):
+        #     print(e1[1], e2[1])
+        # breakpoint()
 
         return ctree, locs
 

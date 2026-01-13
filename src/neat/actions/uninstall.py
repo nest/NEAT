@@ -39,7 +39,7 @@ def _check_model_name(model_name):
 def _uninstall_models(
     *model_names,
     path_neat,
-    simulators=["nest", "neuron"],
+    simulators=["nest", "neuron", "jaxley"],
 ):
     """
     Uninstall the model with the given name from the provided simulators
@@ -75,3 +75,13 @@ def _uninstall_models(
                 print(f"> Uninstalled {model_name} from neuron")
             except FileNotFoundError as e:
                 print(f"> {model_name} not found in neuron, nothing to uninstall.")
+        
+        if "jaxley" in simulators:
+            try:
+                path_jaxley = os.path.join(
+                    path_neat, "simulations/", f"jaxley/tmp/{model_name}.py"
+                )
+                os.remove(path_jaxley)
+                print(f"> Uninstalled {model_name} from jaxley")
+            except FileNotFoundError as e:
+                print(f"> {model_name} not found in jaxley, nothing to uninstall.")
