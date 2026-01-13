@@ -102,7 +102,7 @@ class JaxleySimNode(PhysNode):
             l_comp = 2.0 * self.R
 
         else:
-            n_comp = self.L / dx_max + 1
+            n_comp = int(self.L / dx_max) + 1
             l_comp = self.L / n_comp
 
         compartments = []
@@ -243,22 +243,22 @@ class JaxleySimTree(PhysTree):
             't_sim': t_calibrate + t_max,
         }
         self.model_name = model_name
-        self.pre_dummies = {}
+        self.pre_dummies = []
         self.syn_locs = []
         self.syn_models = []
-
-        # simple tree copy
-        aux_tree = MorphTree(self)
-        aux_tree.reset_indices()
-        self.index_map = {n_orig.index: n_aux.index-1 for n_orig, n_aux in zip(self, aux_tree)}
-
+        
+        # make the Jaxley channel current mechanisms in this model available
         jx_channels = {
             chan: eval(f"JX_MECH['{model_name}'].{chan}()") for chan in self.channel_storage
         }
         jx_channels['L'] = Leak()
 
+        # create Jaxley branches for all nodes
         branches = [node._make_branch(jx_channels) for node in self]
-        parents = [aux_node.parent_node.index-1 if not aux_tree.is_root(aux_node) else -1 for aux_node in aux_tree]
+
+        # create index map for mapping branches to parents
+        self.index_map = {node.index: ii for ii, node in enumerate(self)}
+        parents = [self.index_map[node.parent_node.index] if not self.is_root(node) else -1 for node in self]
 
         self.cell = jx.Cell(branches, parents)
 
@@ -273,16 +273,19 @@ class JaxleySimTree(PhysTree):
         self.pre_dummies = []
         self.syn_locs = []
         self.syn_models = []
-    
-    def add_AMPA_synapse(self, loc):
-        synapse = JX_MECH[f'{self.model_name}'].AMPASynapse()
-        self.syn_locs.append(MorphLoc(loc, self))
-        self.syn_models.append(synapse)
 
-    def add_GABA_synapse(self, loc):
-        synapse = JX_MECH[f'{self.model_name}'].GABASynapse()
+    def _append_synapse(self, loc, synapse):
         self.syn_locs.append(MorphLoc(loc, self))
         self.syn_models.append(synapse)
+        self.pre_dummies.append(None)
+    
+    def add_AMPA_synapse(self, loc, tau_r_AMPA=.2, tau_d_AMPA=3., e_r_AMPA=0.):
+        synapse = JX_MECH[f'{self.model_name}'].AMPASynapse(tau_r_AMPA=tau_r_AMPA, tau_d_AMPA=tau_d_AMPA, e_r_AMPA=e_r_AMPA)
+        self._append_synapse(loc, synapse)
+
+    def add_GABA_synapse(self, loc, tau_r_GABA=.2, tau_d_GABA=10., e_r_GABA=-80.):
+        synapse = JX_MECH[f'{self.model_name}'].GABASynapse(tau_r_GABA=tau_r_GABA, tau_d_GABA=tau_d_GABA, e_r_GABA=e_r_GABA)
+        self._append_synapse(loc, synapse)
 
     def set_spiketrain(self, syn_index, syn_weight, spike_times):
         spike_times = jnp.array(spike_times) + self.sim_control['t_calibrate']
@@ -293,10 +296,15 @@ class JaxleySimTree(PhysTree):
         self.pre_dummies[syn_index] = (jx.Cell(), spks_v)
 
     def run(self):
+        # if there are synapses that don't receive a spiketrain, create empty ones
+        for ii, pd in enumerate(self.pre_dummies):
+            if pd is None:
+                self.set_spiketrain(ii, 0.0, [])
+
         # create the network consisting of the pre dummies and the cell
         net = jx.Network(
             [
-                self.pre_dummies[ii][0] for ii in range(len(self.pre_dummies))
+                pre_dummy[0] for pre_dummy in self.pre_dummies
             ] + [
                 self.cell
             ]

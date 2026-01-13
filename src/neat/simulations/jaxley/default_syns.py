@@ -83,7 +83,6 @@ class DoubleExpSynapse(NEATJaxleySynapse):
         }
 
     def compute_current(self, states, pre_voltage, post_voltage, params):
-        print(self.prefix)#, params)
         e_r = params[f'{self.prefix}e_r']
         v = post_voltage
         x_r = states[f'{self.prefix}x_r']
