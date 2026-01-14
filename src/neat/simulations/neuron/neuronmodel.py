@@ -613,11 +613,8 @@ class NeuronSimTree(PhysTree):
         seed = np.random.randint(1e16) if seed is None else seed
         loc = MorphLoc(loc, self)
         # create the current clamp
-        if tau > 1e-9:
-            iclamp = h.OUClamp(self.sections[loc["node"]](loc["x"]))
-            iclamp.tau = tau
-        else:
-            iclamp = h.WNclamp(self.sections[loc["node"]](loc["x"]))
+        iclamp = h.OUClamp(self.sections[loc["node"]](loc["x"]))
+        iclamp.tau = tau
         iclamp.mean = mean  # nA
         iclamp.stdev = stdev  # nA
         iclamp.delay = delay + self.t_calibrate  # ms
