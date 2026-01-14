@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [ '3.9', '3.10', '3.12' ]
+        python-version: [ '3.9', '3.10', '3.12', '3.13' ]
         
       fail-fast: false
 
@@ -77,6 +77,38 @@ jobs:
       - name: Install NEAT
         run: |
           pip install setuptools
+          pip install .
+
+      # Unit tests
+      - name: Run tests
+        run: |
+          pytest -s -o norecursedirs='*' -o log_cli=true -o log_cli_level="DEBUG" tests
+
+  
+  build_and_test_legacy_neuron:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ '3.10' ]
+        
+      fail-fast: false
+
+    steps:
+      # Checkout the repository contents
+      - name: Checkout NEAT code
+        uses: actions/checkout@v4
+
+      # Setup Python version
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Install NEAT
+      - name: Install NEAT
+        run: |
+          pip install setuptools
+          pip install neuron==8.2.4
           pip install .
 
       # Unit tests

@@ -90,13 +90,7 @@ except ModuleNotFoundError:
 
 
 def load_neuron_model(name):
-    path = os.path.join(
-        os.path.dirname(__file__),
-        f"tmp/{name}/{platform.machine()}/.libs/libnrnmech.so",
-    )
-    if os.path.exists(path):
-        h.nrn_load_dll(path)  # load all mechanisms
-    else:
+    def print_err():
         path_name = os.path.join(os.path.dirname(__file__), "tmp/")
         raise FileNotFoundError(
             f"The NEURON model named '{name}' is not installed. "
@@ -104,6 +98,25 @@ def load_neuron_model(name):
             f"installing new NEURON models with NEAT. "
             f"Installed models will be in '{path_name}'."
         )
+
+    if int(neuron.__version__.split(".")[0]) < 9:
+        path = os.path.join(
+            os.path.dirname(__file__),
+            f"tmp/{name}/{platform.machine()}/.libs/libnrnmech.so",
+        )
+        if os.path.exists(path):
+            h.nrn_load_dll(path)  # load all mechanisms
+        else:
+            print_err()
+    else:
+        path = os.path.join(
+            os.path.dirname(__file__),
+            f"tmp/{name}",
+        )
+        if os.path.exists(path):
+            neuron.load_mechanisms(path)
+        else:
+            print_err()
 
 
 class MechName(object):
