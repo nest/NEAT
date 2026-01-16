@@ -279,7 +279,8 @@ class TestNeuron:
                     jj += 1
             pl.show()
 
-    def test_channel_recording(self):
+    @pytest.mark.parametrize("use_coreneuron", [False, True])
+    def test_channel_recording(self, use_coreneuron):
         self.load_T_tree_test_channel()
         # set of locations
         locs = [(1, 0.5), (4, 0.5), (4, 1.0), (5, 0.5), (6, 0.5), (7, 0.5), (8, 0.5)]
@@ -287,7 +288,7 @@ class TestNeuron:
         self.neurontree.init_model(t_calibrate=10.0, factor_lambda=10.0)
         self.neurontree.store_locs(locs, name="rec locs")
         # run test simulation
-        res = self.neurontree.run(1.0, record_from_channels=True)
+        res = self.neurontree.run(1.0, record_from_channels=True, use_coreneuron=use_coreneuron)
         # check if results are stored correctly
         assert set(res["chan"]["test_channel2"].keys()) == {
             "a00",
@@ -318,7 +319,7 @@ class TestNeuron:
         self.neurontree.init_model(t_calibrate=100.0, factor_lambda=10.0)
         self.neurontree.store_locs(locs, name="rec locs")
         # run test simulation
-        res = self.neurontree.run(10.0, record_from_channels=True)
+        res = self.neurontree.run(10.0, record_from_channels=True, use_coreneuron=use_coreneuron)
         # check if results are stored correctly
         assert set(res["chan"]["test_channel2"].keys()) == {
             "a00",
@@ -365,7 +366,7 @@ class TestNeuron:
         self.neurontree.init_model(t_calibrate=10.0, dt=0.1, factor_lambda=10.0)
         self.neurontree.store_locs(locs, name="rec locs")
         res2 = self.neurontree.run(
-            10.0, downsample=1, dt_rec=1.0, record_from_channels=True
+            10.0, downsample=1, dt_rec=1.0, record_from_channels=True, use_coreneuron=use_coreneuron
         )
         self.neurontree.delete_model()
 
@@ -1064,10 +1065,10 @@ def debug_print(pstr):
         print(e)
 
 if __name__ == "__main__":
-    # tn = TestNeuron()
+    tn = TestNeuron()
     # tn.test_passive(pplot=True)
     # tn.test_active(pplot=True)
-    # tn.test_channel_recording()
+    tn.test_channel_recording(use_coreneuron=True)
     # tn.test_recording_timestep()
 
     # trn = TestReducedNeuron()
@@ -1076,6 +1077,6 @@ if __name__ == "__main__":
     # trn.test_geometry2()
     # trn.test_impedance_properties_2()
 
-    ts = TestStimuli()
-    ts.test_i_clamp(pplot=True)
+    # ts = TestStimuli()
+    # ts.test_i_clamp(pplot=True)
     # ts.test_ou_processes()

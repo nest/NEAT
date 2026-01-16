@@ -895,7 +895,7 @@ class NeuronSimTree(PhysTree):
                             rec_vec = h.Vector()
                             _rec_coreneuron_compatible(
                                 rec_vec,
-                                exec(
+                                eval(
                                     f"self.sections[loc['node']](xx).{mechname[channel_name]}._ref_{var}"
                                 ),
                                 dt_rec,
@@ -914,7 +914,7 @@ class NeuronSimTree(PhysTree):
                         rec_vec = h.Vector()
                         _rec_coreneuron_compatible(
                             rec_vec,
-                            exec(
+                            eval(
                                 f"self.sections[loc['node']](loc['x'])._ref_{c_ion}i"
                             ),
                             dt_rec,
@@ -933,7 +933,7 @@ class NeuronSimTree(PhysTree):
                         rec_vec = h.Vector()
                         _rec_coreneuron_compatible(
                             rec_vec,
-                            exec(
+                            eval(
                                 f"self.sections[loc['node']](loc['x'])._ref_{curr_name}"
                             ),
                             dt_rec,

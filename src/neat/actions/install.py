@@ -27,7 +27,10 @@ import inspect
 import platform
 import importlib
 import subprocess
-
+try:
+    import neuron
+except ModuleNotFoundError:
+    pass
 
 from neat import IonChannel, ExpConcMech
 from neat.simulations.nest import nestml_tools
@@ -199,7 +202,10 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
 
     # # Also keep these for good measure
     # my_env["MAKEFLAGS"] = "-j1"
-    subprocess.call(["nrnivmodl", "-coreneuron", "mech/"])  # compile all mod files
+    if int(neuron.__version__.split(".")[0]) < 9:
+        subprocess.call(["nrnivmodl", "mech/"])  # compile all mod files
+    else:   
+        subprocess.call(["nrnivmodl", "-coreneuron", "mech/"])  # compile all mod files
 
     print(
         f"\n------------------------------\n"
