@@ -164,18 +164,17 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
     path_for_neuron_compilation = os.path.join(
         path_neat, "simulations/neuron/tmp/", model_name
     )
+    # delete old compiled files if exist
+    if os.path.exists(path_for_neuron_compilation):  
+        shutil.rmtree(path_for_neuron_compilation)
     path_for_mod_files = os.path.join(path_for_neuron_compilation, "mech/")
 
     print(f"--- writing channels to \n" f" > {path_for_mod_files}")
 
     # Create the "mech/" directory in a clean state
-    if os.path.exists(path_for_mod_files):
-        shutil.rmtree(path_for_mod_files)
     os.makedirs(path_for_mod_files)
 
-    # copy default mechanisms
-    # if path_neuronresource is not None:
-    #     shutil.copytree(path_neuronresource, path_for_mod_files)
+    # copy mechanisms from resource path
     if path_neuronresource is not None:
         for mod_file in glob.glob(os.path.join(path_neuronresource, "*.mod")):
             shutil.copy2(mod_file, path_for_mod_files)
@@ -184,14 +183,22 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
         print(" - writing .mod file for:", chan.__class__.__name__)
         chan.write_mod_file(path_for_mod_files)
 
-    # # copy possible mod-files within the source directory to the compile directory
-    # for mod_file in glob.glob(os.path.join(path_for_channels, '*.mod')):
-    #     shutil.copy2(mod_file, path_for_mod_files)
 
     # change to directory where 'mech/' folder is located and compile the mechanisms
     os.chdir(path_for_neuron_compilation)
-    if os.path.exists(f"{platform.machine()}/"):  # delete old compiled files if exist
-        shutil.rmtree(f"{platform.machine()}/")
+    # with open(".noindex", "w") as f:  # prevent mac from indexing compiled files
+    #     pass
+    # subprocess.run(["mdutil", "-i", "off", path_for_neuron_compilation])
+    # if os.path.exists(f"{platform.machine()}/"):  # delete old compiled files if exist
+    #     shutil.rmtree(f"{platform.machine()}/")
+    print("!!!", os.getcwd())
+    # my_env = os.environ.copy()
+    # # This forces every sub-call to 'make' to append -j1, effectively 
+    # # overriding the -j4 passed by the nrnivmodl wrapper.
+    # my_env["MAKE"] = "make -j1"
+
+    # # Also keep these for good measure
+    # my_env["MAKEFLAGS"] = "-j1"
     subprocess.call(["nrnivmodl", "-coreneuron", "mech/"])  # compile all mod files
 
     print(

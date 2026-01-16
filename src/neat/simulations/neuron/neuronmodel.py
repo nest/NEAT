@@ -109,12 +109,15 @@ def load_neuron_model(name):
         else:
             print_err()
     else:
+        print(f"Loading NEURON model '{name}'")
         path = os.path.join(
             os.path.dirname(__file__),
             f"tmp/{name}",
         )
         if os.path.exists(path):
+            print(f"Found path: {path}, loading mechanisms...")
             neuron.load_mechanisms(path)
+            print(f"... done.")
         else:
             print_err()
 
