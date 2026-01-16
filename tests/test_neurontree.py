@@ -847,14 +847,41 @@ class TestStimuli:
                 1
         """
         self.v_eq = -75.0
-        self.dt = 0.1
-        self.tmax = 10000.0
-        self.t_calibrate = 50.
         # load the morphology
         fname = os.path.join(MORPHOLOGIES_PATH_PREFIX, "ball.swc")
         self.tree = NeuronSimTree(fname, types=[1, 3, 4])
         self.tree.fit_leak_current(self.v_eq, 10.0)
         self.tree.set_comp_tree()
+
+    def test_i_clamp(self, pplot=False):
+        # parameter setup
+        dt = 0.1
+        tmax = 1000.0
+        t_calibrate = 50.
+        amp = 0.01
+
+        self._create_ball()
+        self.tree.init_model(t_calibrate=t_calibrate, dt=dt)
+        # add step current clamp
+        self.tree.add_i_clamp(
+            loc=(1, 0.5),
+            delay=3 * tmax / 10,
+            dur= 4 * tmax / 10.,
+            amp=0.01,
+        )
+
+        res = self.tree.run(tmax, record_from_iclamps=True, use_coreneuron=True)
+        print(res['v_m'])
+
+        if pplot:
+            import matplotlib.pyplot as plt
+
+            plt.figure()
+            plt.plot(res['t'], res['i_clamp'][0,:], label='I Clamp')
+            plt.plot(res['t'], res['v_m'][0,:], label='V Membrane')
+            plt.xlabel('Time [ms]')
+            plt.legend()
+            plt.show()
 
     def _voltage_statistics(self, delta_t, mu_ou, sigma_ou, tau_ou):
         """
@@ -963,20 +990,24 @@ class TestStimuli:
         return np.arange(max_lag + 1), acf / normalization
 
     def test_ou_processes(self, pplot=False):
+        # parameter setup
+        dt = 0.1
+        tmax = 10000.0
+        t_calibrate = 50.
         tau_ou = 5.0
         sigma_ou = 0.005
         mu_ou = 0.05
 
         self._create_ball()
-        self.tree.init_model(t_calibrate=self.t_calibrate, dt=self.dt)
+        self.tree.init_model(t_calibrate=t_calibrate, dt=dt)
         # add OU process
         self.tree.add_ou_clamp(
             loc=(1, 0.5),
             mean=mu_ou,
             stdev=sigma_ou,
             tau=tau_ou,
-            delay=-self.t_calibrate / 2.,
-            dur=self.tmax + self.t_calibrate / 2.,
+            delay=-t_calibrate / 2.,
+            dur=tmax + t_calibrate / 2.,
             seed=46,
         )
 
@@ -1046,4 +1077,5 @@ if __name__ == "__main__":
     # trn.test_impedance_properties_2()
 
     ts = TestStimuli()
-    ts.test_ou_processes()
+    ts.test_i_clamp(pplot=True)
+    # ts.test_ou_processes()
