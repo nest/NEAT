@@ -192,7 +192,7 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
     os.chdir(path_for_neuron_compilation)
     if os.path.exists(f"{platform.machine()}/"):  # delete old compiled files if exist
         shutil.rmtree(f"{platform.machine()}/")
-    subprocess.call(["nrnivmodl", "mech/"])  # compile all mod files
+    subprocess.call(["nrnivmodl", "-coreneuron", "mech/"])  # compile all mod files
 
     print(
         f"\n------------------------------\n"
