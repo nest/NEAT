@@ -346,6 +346,11 @@ class NeuronSimTree(PhysTree):
         )
         # reset all storage
         self.delete_model()
+        # parallel contect
+        self.pc = h.ParallelContext()
+        self.pc.gid_clear()
+        self.gid =  0#self.pc.id()   # or any unique integer
+        self.pc.set_gid2node(self.gid, self.pc.id())
         # create the NEURON model
         self._create_neuron_tree(pprint=pprint)
 
@@ -362,6 +367,8 @@ class NeuronSimTree(PhysTree):
         self.vecstims = []
         self.netcons = []
         self.vecs = []
+        self.pc = None
+        self.gid = None
         self.store_locs([{"node": 1, "x": 0.0}], "rec locs")
 
     def _create_neuron_tree(self, pprint):
@@ -736,6 +743,7 @@ class NeuronSimTree(PhysTree):
         vecstim = h.VecStim()
         vecstim.play(spks_vec)
         netcon = h.NetCon(vecstim, self.syns[syn_index], 0, self.dt, syn_weight)
+        self.pc.cell(self.gid, netcon)
         # store the objects
         self.vecs.append(spks_vec)
         self.vecstims.append(vecstim)
@@ -956,9 +964,17 @@ class NeuronSimTree(PhysTree):
                 None,
                 sec=self.sections[spike_rec_loc[0]],
             )
+            self.pc.cell(self.pc.id(), self.spike_detector)
             self.spike_detector.threshold = spike_rec_thr
             res["spikes"] = h.Vector()
             self.spike_detector.record(res["spikes"])
+
+
+        def _export_coreneuron_model(path="_coreneuron"):
+            if os.path.exists(path):
+                shutil.rmtree(path)
+                os.makedirs(path)
+                h.nrncore_write(path)
 
         # initialize
         # neuron.celsius=37.
@@ -972,11 +988,13 @@ class NeuronSimTree(PhysTree):
             h.continuerun(t_max + self.t_calibrate)
         else:
             h.CVode().active(0)
+            h.cvode.cache_efficient(1)
             coreneuron.enable = True
-            pc = h.ParallelContext()
-            pc.set_maxstep(10) # Set global step for parallel communication
+            _export_coreneuron_model()
+            # pc = h.ParallelContext()
+            # pc.set_maxstep(10) # Set global step for parallel communication
             h.finitialize(self.v_init)
-            pc.psolve(t_max + self.t_calibrate)     # Solve for 100 ms
+            self.pc.psolve(t_max + self.t_calibrate)     # Solve for 100 ms
 
         stop = time.process_time()
         if pprint:

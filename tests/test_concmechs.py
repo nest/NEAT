@@ -339,6 +339,7 @@ class TestConcMechs:
             record_concentrations=["ca"],
             record_currents=rec_currs,
             spike_rec_loc=rec_locs[0],
+            use_coreneuron=True,
         )
 
         return res
@@ -995,13 +996,13 @@ class TestConcMechs:
 
 if __name__ == "__main__":
     tcm = TestConcMechs()
-    tcm.test_string_representation()
+    # tcm.test_string_representation()
     tcm.test_spiking(pplot=True)
-    tcm.test_impedance(pplot=True)
-    tcm.test_fitting_ball(pplot=True)
-    tcm.test_taufit_ball(pplot=True)
-    tcm.test_fitting_ball_and_stick(pplot=True)
-    tcm.test_finite_difference()
-    tcm.test_localized_conc_mech_pas_axon()
-    tcm.test_localized_conc_mech_act_axon()
-    tcm.test_nest_neuron_sim_ball(pplot=True, amp=2.0)
+    # tcm.test_impedance(pplot=True)
+    # tcm.test_fitting_ball(pplot=True)
+    # tcm.test_taufit_ball(pplot=True)
+    # tcm.test_fitting_ball_and_stick(pplot=True)
+    # tcm.test_finite_difference()
+    # tcm.test_localized_conc_mech_pas_axon()
+    # tcm.test_localized_conc_mech_act_axon()
+    # tcm.test_nest_neuron_sim_ball(pplot=True, amp=2.0)
