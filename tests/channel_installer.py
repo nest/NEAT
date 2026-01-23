@@ -38,12 +38,14 @@ def load_or_install_neuron_test_channels():
     channel_file = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "channelcollection_for_tests.py")
     )
+    print("check running load_or_install_neuron_test_channels")
     try:
         # load_neuron_model() calls will raise a RuntimeError is a compiled model
         # is loaded multiple times
         try:
             # raises FileNotFoundError if not compiled
             load_neuron_model("multichannel_test")
+            print("loaded multichannel_test neuron model")
         except FileNotFoundError:
             subprocess.call(
                 [

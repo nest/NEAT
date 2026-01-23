@@ -34,7 +34,18 @@ from ...factorydefaults import DefaultPhysiology
 
 try:
     import neuron
-    from neuron import coreneuron
+
+    if (
+        "NEURON_USING_SPECIAL" in os.environ
+        and os.environ["NEURON_USING_SPECIAL"] == "1"
+    ):
+        from neuron import coreneuron
+
+        coreneuron.enable = True
+        USE_CORENEURON = True
+    else:
+        USE_CORENEURON = False
+
     from neuron import h
 
     h.load_file("stdlib.hoc")  # contains the lambda rule
@@ -117,28 +128,12 @@ def load_neuron_model(name):
         )
         if os.path.exists(path):
             print(f"Found path: {path}, loading mechanisms...")
-            # import ctypes
-            # mech_path = os.path.join(path, f"{platform.machine()}/libcorenrnmech.dylib")
-            # h.nrn_load_dll(mech_path)
-
-            path1 = os.path.join(
-                os.path.dirname(__file__),
-                f"tmp/{name}/{platform.machine()}/libnrnmech.dylib",
-            )
-            # path2 = os.path.join(
-            #     os.path.dirname(__file__),
-            #     f"tmp/{name}/{platform.machine()}/libcorenrnmech.dylib",
-            # )
-
-            coreneuron.enable = True
-            # h.nrn_load_dll(path2)
-            h.nrn_load_dll(path1)
-            # neuron.load_mechanisms(path)
-
-
-
+            if not USE_CORENEURON:
+                # only needs to be loaded if we are not running using special
+                mech_loaded_bool = neuron.load_mechanisms(path)
+                if not mech_loaded_bool:
+                    raise FileNotFoundError(f"Loading mechanisms from '{path}' failed.")
             print(f"... done.")
-            # import os
         else:
             print_err()
 
@@ -369,7 +364,7 @@ class NeuronSimTree(PhysTree):
         # parallel contect
         self.pc = h.ParallelContext()
         self.pc.gid_clear()
-        self.gid =  0#self.pc.id()   # or any unique integer
+        self.gid = 0  # self.pc.id()   # or any unique integer
         self.pc.set_gid2node(self.gid, self.pc.id())
         # create the NEURON model
         self._create_neuron_tree(pprint=pprint)
@@ -783,7 +778,6 @@ class NeuronSimTree(PhysTree):
         record_currents=[],
         spike_rec_loc=None,
         spike_rec_thr=-20.0,
-        use_coreneuron=False,
         pprint=False,
     ):
         """
@@ -798,7 +792,7 @@ class NeuronSimTree(PhysTree):
             Records the state of the model every `downsample` time-steps
         dt_rec: float or None
             recording time step (if `None` is given, defaults to the simulation
-            time-step). Note that if `use_coreneuron` is set to ``True``, this parameter
+            time-step). Note that if running with coreneuron, this parameter
             is ignored and recording is done at every simulation time-step and
             downsampled according to the `downsample` argument.
         record_from_syns: bool (default ``False``)
@@ -829,8 +823,6 @@ class NeuronSimTree(PhysTree):
             Record the output spike times from this location
         spike_rec_thr: float
             Spike threshold
-        use_coreneuron: bool (default ``False``)
-            Whether or not to use CoreNEURON to run the simulation
         pprint: bool (default ``False``)
             Whether or not to print info on the NEURON simulation
 
@@ -849,20 +841,18 @@ class NeuronSimTree(PhysTree):
         indstart = int(self.t_calibrate / dt_rec)
 
         def _rec_coreneuron_compatible(vec, var, dt_rec):
-            """ Helper function to make recording compatible with CoreNEURON
+            """Helper function to make recording compatible with CoreNEURON
             We're not allowed to use the dt argument in vec.record when using
             CoreNEURON, so we manually downsample after the simulation
             """
-            if use_coreneuron:
+            if USE_CORENEURON:
                 vec.record(var)
             else:
                 vec.record(var, dt_rec)
 
         # simulation time recorder
         res = {"t": h.Vector()}
-        _rec_coreneuron_compatible(
-            res["t"], h._ref_t, dt_rec
-        )
+        _rec_coreneuron_compatible(res["t"], h._ref_t, dt_rec)
 
         # voltage recorders
         res["v_m"] = []
@@ -870,34 +860,28 @@ class NeuronSimTree(PhysTree):
             res["v_m"].append(h.Vector())
             _rec_coreneuron_compatible(
                 res["v_m"][-1], self.sections[loc["node"]](loc["x"])._ref_v, dt_rec
-            )   
+            )
 
         # synapse current recorders
         if record_from_syns:
             res["i_syn"] = []
             for syn in self.syns:
                 res["i_syn"].append(h.Vector())
-                _rec_coreneuron_compatible(
-                    res["i_syn"][-1], syn._ref_i, dt_rec
-                )
+                _rec_coreneuron_compatible(res["i_syn"][-1], syn._ref_i, dt_rec)
 
         # current clamp current recorders
         if record_from_iclamps:
             res["i_clamp"] = []
             for iclamp in self.iclamps:
                 res["i_clamp"].append(h.Vector())
-                _rec_coreneuron_compatible(
-                    res["i_clamp"][-1], iclamp._ref_i, dt_rec
-                )
+                _rec_coreneuron_compatible(res["i_clamp"][-1], iclamp._ref_i, dt_rec)
 
         # voltage clamp current recorders
         if record_from_vclamps:
             res["i_vclamp"] = []
             for vclamp in self.vclamps:
                 res["i_vclamp"].append(h.Vector())
-                _rec_coreneuron_compatible(
-                    res["i_vclamp"][-1], vclamp._ref_i, dt_rec 
-                )
+                _rec_coreneuron_compatible(res["i_vclamp"][-1], vclamp._ref_i, dt_rec)
 
         # channel state variable recordings
         if record_from_channels:
@@ -942,9 +926,7 @@ class NeuronSimTree(PhysTree):
                         rec_vec = h.Vector()
                         _rec_coreneuron_compatible(
                             rec_vec,
-                            eval(
-                                f"self.sections[loc['node']](loc['x'])._ref_{c_ion}i"
-                            ),
+                            eval(f"self.sections[loc['node']](loc['x'])._ref_{c_ion}i"),
                             dt_rec,
                         )
                     except AttributeError:
@@ -989,13 +971,6 @@ class NeuronSimTree(PhysTree):
             res["spikes"] = h.Vector()
             self.spike_detector.record(res["spikes"])
 
-
-        def _export_coreneuron_model(path="_coreneuron"):
-            if os.path.exists(path):
-                shutil.rmtree(path)
-                os.makedirs(path)
-                h.nrncore_write(path)
-
         # initialize
         # neuron.celsius=37.
         h.dt = self.dt
@@ -1003,18 +978,15 @@ class NeuronSimTree(PhysTree):
         if pprint:
             print(">>> Simulating the NEURON model for " + str(t_max) + " ms. <<<")
         start = time.process_time()
-        if not use_coreneuron:
+        if not USE_CORENEURON:
             h.finitialize(self.v_init)
             h.continuerun(t_max + self.t_calibrate)
         else:
             h.CVode().active(0)
             h.cvode.cache_efficient(1)
             coreneuron.enable = True
-            # _export_coreneuron_model()
-            # pc = h.ParallelContext()
-            # pc.set_maxstep(10) # Set global step for parallel communication
             h.finitialize(self.v_init)
-            self.pc.psolve(t_max + self.t_calibrate)     # Solve for 100 ms
+            self.pc.psolve(t_max + self.t_calibrate)  # Solve for 100 ms
 
         stop = time.process_time()
         if pprint:
@@ -1220,7 +1192,7 @@ class NeuronSimTree(PhysTree):
         np.array
             The impulse response kernel in [MOhm/ms]
         """
-        (loc0, loc1) = self.convert_loc_arg_to_locs([loc0, loc1])
+        loc0, loc1 = self.convert_loc_arg_to_locs([loc0, loc1])
         self.set_simulation_parameters(
             dt=dt, t_calibrate=t_calibrate, v_init=v_init, factor_lambda=factor_lambda
         )

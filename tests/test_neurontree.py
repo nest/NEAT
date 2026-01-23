@@ -279,8 +279,7 @@ class TestNeuron:
                     jj += 1
             pl.show()
 
-    @pytest.mark.parametrize("use_coreneuron", [False, True])
-    def test_channel_recording(self, use_coreneuron):
+    def test_channel_recording(self):
         self.load_T_tree_test_channel()
         # set of locations
         locs = [(1, 0.5), (4, 0.5), (4, 1.0), (5, 0.5), (6, 0.5), (7, 0.5), (8, 0.5)]
@@ -288,9 +287,8 @@ class TestNeuron:
         self.neurontree.init_model(t_calibrate=10.0, factor_lambda=10.0)
         self.neurontree.store_locs(locs, name="rec locs")
         # run test simulation
-        res = self.neurontree.run(1.0, record_from_channels=True, use_coreneuron=use_coreneuron)
+        res = self.neurontree.run(1.0, record_from_channels=True)
 
-        print("!!!!!", res["chan"]["test_channel2"]["a00"])
         # check if results are stored correctly
         assert set(res["chan"]["test_channel2"].keys()) == {
             "a00",
@@ -321,7 +319,7 @@ class TestNeuron:
         self.neurontree.init_model(t_calibrate=100.0, factor_lambda=10.0)
         self.neurontree.store_locs(locs, name="rec locs")
         # run test simulation
-        res = self.neurontree.run(10.0, record_from_channels=True, use_coreneuron=use_coreneuron)
+        res = self.neurontree.run(10.0, record_from_channels=True)
         # check if results are stored correctly
         assert set(res["chan"]["test_channel2"].keys()) == {
             "a00",
@@ -352,7 +350,7 @@ class TestNeuron:
         assert res["chan"]["test_channel2"]["a11"].shape == (n_loc, n_step)
         assert res["chan"]["test_channel2"]["p_open"].shape == (n_loc, n_step)
 
-    def test_recording_timestep(self,use_coreneuron=False):
+    def test_recording_timestep(self):
         self.load_T_tree_test_channel()
         # set of locations
         locs = [(1, 0.5), (4, 0.5), (4, 1.0), (5, 0.5), (6, 0.5), (7, 0.5), (8, 0.5)]
@@ -368,7 +366,7 @@ class TestNeuron:
         self.neurontree.init_model(t_calibrate=10.0, dt=0.1, factor_lambda=10.0)
         self.neurontree.store_locs(locs, name="rec locs")
         res2 = self.neurontree.run(
-            10.0, downsample=1, dt_rec=1.0, record_from_channels=True, use_coreneuron=use_coreneuron
+            10.0, downsample=1, dt_rec=1.0, record_from_channels=True
         )
         self.neurontree.delete_model()
 
@@ -838,7 +836,6 @@ class TestReducedNeuron:
         assert np.allclose(z_mat_sim, z_mat_comp)
 
 
-
 class TestStimuli:
     def _create_ball(self):
         """
@@ -860,7 +857,7 @@ class TestStimuli:
         # parameter setup
         dt = 0.1
         tmax = 1000.0
-        t_calibrate = 50.
+        t_calibrate = 50.0
         amp = 0.01
 
         self._create_ball()
@@ -869,27 +866,27 @@ class TestStimuli:
         self.tree.add_i_clamp(
             loc=(1, 0.5),
             delay=3 * tmax / 10,
-            dur= 4 * tmax / 10.,
+            dur=4 * tmax / 10.0,
             amp=0.01,
         )
 
-        res = self.tree.run(tmax, record_from_iclamps=True, use_coreneuron=True)
-        print(res['v_m'])
+        res = self.tree.run(tmax, record_from_iclamps=True)
+        print(res["v_m"])
 
         if pplot:
             import matplotlib.pyplot as plt
 
             plt.figure()
-            plt.plot(res['t'], res['i_clamp'][0,:], label='I Clamp')
-            plt.plot(res['t'], res['v_m'][0,:], label='V Membrane')
-            plt.xlabel('Time [ms]')
+            plt.plot(res["t"], res["i_clamp"][0, :], label="I Clamp")
+            plt.plot(res["t"], res["v_m"][0, :], label="V Membrane")
+            plt.xlabel("Time [ms]")
             plt.legend()
             plt.show()
 
     def _voltage_statistics(self, delta_t, mu_ou, sigma_ou, tau_ou):
         """
         Stationary autocovariance C_v(Δ).
-        
+
         Parameters
         ----------
         delta_t : array_like
@@ -901,30 +898,31 @@ class TestStimuli:
         mu_ou : float
             OU mean [nA]
         """
-        mu_ou *= 1e-3 # nA to uA
-        sigma_ou *= 1e-3 # nA to uA
+        mu_ou *= 1e-3  # nA to uA
+        sigma_ou *= 1e-3  # nA to uA
 
         soma = self.tree[1]
-        tau = soma.c_m / soma.currents['L'][0] * 1e3  # s to ms
-        e_l = soma.currents['L'][1]
+        tau = soma.c_m / soma.currents["L"][0] * 1e3  # s to ms
+        e_l = soma.currents["L"][1]
         ca = soma.c_m * 4 * np.pi * soma.R**2 * 1e-8  # um^2 to cm^2
 
         # voltage mean
-        mean = e_l + tau * mu_ou / ca # ms * V / s = mV
+        mean = e_l + tau * mu_ou / ca  # ms * V / s = mV
 
         delta_t = np.abs(np.asarray(delta_t))
 
-        prefactor = sigma_ou**2 / ca**2 # (uA / uF)^2 = (V / s)^2
-        scale = (tau**2 * tau_ou) / (tau_ou**2 - tau**2) 
+        prefactor = sigma_ou**2 / ca**2  # (uA / uF)^2 = (V / s)^2
+        scale = (tau**2 * tau_ou) / (tau_ou**2 - tau**2)
 
         # autocovarianvce
-        autocov = prefactor * scale * (
-            tau_ou * np.exp(-delta_t / tau_ou)
-            - tau * np.exp(-delta_t / tau)
-        ) # (V / s)^2 * ms^2 = mV^2
+        autocov = (
+            prefactor
+            * scale
+            * (tau_ou * np.exp(-delta_t / tau_ou) - tau * np.exp(-delta_t / tau))
+        )  # (V / s)^2 * ms^2 = mV^2
 
         return mean, autocov
-    
+
     def _autocovariance(self, x, max_lag=None):
         """
         Empirical autocovariance of a 1D time series.
@@ -952,7 +950,7 @@ class TestStimuli:
 
         cov = np.empty(max_lag + 1)
         for k in range(max_lag + 1):
-            cov[k] = np.dot(x[:N-k], x[k:]) / (N - k)
+            cov[k] = np.dot(x[: N - k], x[k:]) / (N - k)
 
         lags = np.arange(max_lag + 1)
         return lags, cov
@@ -987,7 +985,7 @@ class TestStimuli:
         fx = np.fft.fft(x, n=nfft)
         acf = np.fft.ifft(fx * np.conjugate(fx)).real
 
-        acf = acf[:max_lag + 1]
+        acf = acf[: max_lag + 1]
         normalization = N - np.arange(max_lag + 1)
 
         return np.arange(max_lag + 1), acf / normalization
@@ -996,7 +994,7 @@ class TestStimuli:
         # parameter setup
         dt = 0.1
         tmax = 10000.0
-        t_calibrate = 50.
+        t_calibrate = 50.0
         tau_ou = 5.0
         sigma_ou = 0.005
         mu_ou = 0.05
@@ -1009,51 +1007,59 @@ class TestStimuli:
             mean=mu_ou,
             stdev=sigma_ou,
             tau=tau_ou,
-            delay=-t_calibrate / 2.,
-            dur=tmax + t_calibrate / 2.,
+            delay=-t_calibrate / 2.0,
+            dur=tmax + t_calibrate / 2.0,
             seed=46,
         )
 
         res = self.tree.run(tmax, record_from_iclamps=True)
 
-        mu_ou_empirical = np.mean(res['i_clamp'][0,:])
-        cov_ou_empirical = np.cov(res['i_clamp'][0,:])
+        mu_ou_empirical = np.mean(res["i_clamp"][0, :])
+        cov_ou_empirical = np.cov(res["i_clamp"][0, :])
 
         print(f"OU mean: exact={mu_ou:.10f} nA, empirical={mu_ou_empirical:.10f} nA")
-        print(f"OU variance: exact={sigma_ou**2:.10f} nA^2, empirical={cov_ou_empirical:.10f} nA^2")
-        
+        print(
+            f"OU variance: exact={sigma_ou**2:.10f} nA^2, empirical={cov_ou_empirical:.10f} nA^2"
+        )
+
         # check current statistics
         assert np.abs(mu_ou_empirical - mu_ou) / np.abs(mu_ou) < 0.05
         assert np.abs(cov_ou_empirical - sigma_ou**2) / sigma_ou**2 < 0.05
 
         mu_exact, cov_exact = self._voltage_statistics(
-            delta_t=res['t'],
+            delta_t=res["t"],
             mu_ou=mu_ou,
             sigma_ou=sigma_ou,
             tau_ou=tau_ou,
         )
-        mu_empirical = np.mean(res['v_m'][0, :])
-        cov_np = np.cov(res['v_m'][0, :])
-        _, cov_empirical = self._autocovariance_fft(res['v_m'][0, :])
+        mu_empirical = np.mean(res["v_m"][0, :])
+        cov_np = np.cov(res["v_m"][0, :])
+        _, cov_empirical = self._autocovariance_fft(res["v_m"][0, :])
 
-        print(f"Voltage mean: exact={mu_exact:.10f} mV, empirical={mu_empirical:.10f} mV")
-        print(f"Voltage variance: exact={cov_exact[0]:.10f} mV^2, empirical={cov_np:.10f} mV^2")
+        print(
+            f"Voltage mean: exact={mu_exact:.10f} mV, empirical={mu_empirical:.10f} mV"
+        )
+        print(
+            f"Voltage variance: exact={cov_exact[0]:.10f} mV^2, empirical={cov_np:.10f} mV^2"
+        )
 
         # check voltage statistics
         assert np.abs(mu_empirical - mu_exact) / np.abs(mu_exact) < 0.05
         assert np.abs(cov_np - cov_exact[0]) / cov_exact[0] < 0.1
-        assert np.mean(np.abs(cov_empirical[:500] - cov_exact[:500]) / cov_exact[0]) < 0.05
+        assert (
+            np.mean(np.abs(cov_empirical[:500] - cov_exact[:500]) / cov_exact[0]) < 0.05
+        )
 
         if pplot:
             pl.figure(figsize=(12, 5))
             ax = pl.subplot(1, 3, 1)
-            ax.plot(res['t'], res['v_m'][0, :])
+            ax.plot(res["t"], res["v_m"][0, :])
             ax.axhline(mu_exact)
-            ax.axhline(mu_empirical, color='orange')
+            ax.axhline(mu_empirical, color="orange")
             ax = pl.subplot(1, 3, 2)
-            ax.plot(res['t'][:500], cov_exact[:500], label='Exact')
-            ax.plot(res['t'][:500], cov_empirical[:500], label='Empirical')
-            ax.axhline(cov_np, color='gray', linestyle='--', label='Empirical variance')
+            ax.plot(res["t"][:500], cov_exact[:500], label="Exact")
+            ax.plot(res["t"][:500], cov_empirical[:500], label="Empirical")
+            ax.axhline(cov_np, color="gray", linestyle="--", label="Empirical variance")
             ax.legend(loc=0)
             pl.show()
 
@@ -1062,16 +1068,23 @@ def debug_print(pstr):
 
     print(pstr)
     try:
-        print(os.listdir(os.path.join(neat.__path__[0], "simulations/neuron/tmp/multichannel_test/arm64")))
+        print(
+            os.listdir(
+                os.path.join(
+                    neat.__path__[0], "simulations/neuron/tmp/multichannel_test/arm64"
+                )
+            )
+        )
     except FileNotFoundError as e:
         print(e)
+
 
 if __name__ == "__main__":
     # sys.exit(pytest.main(sys.argv[1:]))
     tn = TestNeuron()
     # tn.test_passive(pplot=True)
     # tn.test_active(pplot=True)
-    tn.test_channel_recording(use_coreneuron=True)
+    tn.test_channel_recording()
     # tn.test_recording_timestep()
 
     # trn = TestReducedNeuron()

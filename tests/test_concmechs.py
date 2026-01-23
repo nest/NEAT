@@ -30,7 +30,6 @@ import subprocess
 
 import pytest
 
-
 try:
     import nest
     import nest.lib.hl_api_exceptions as nestexceptions
