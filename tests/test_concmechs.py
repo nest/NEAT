@@ -338,7 +338,6 @@ class TestConcMechs:
             record_concentrations=["ca"],
             record_currents=rec_currs,
             spike_rec_loc=rec_locs[0],
-            use_coreneuron=True,
         )
 
         return res
