@@ -117,8 +117,28 @@ def load_neuron_model(name):
         )
         if os.path.exists(path):
             print(f"Found path: {path}, loading mechanisms...")
-            neuron.load_mechanisms(path)
+            # import ctypes
+            # mech_path = os.path.join(path, f"{platform.machine()}/libcorenrnmech.dylib")
+            # h.nrn_load_dll(mech_path)
+
+            path1 = os.path.join(
+                os.path.dirname(__file__),
+                f"tmp/{name}/{platform.machine()}/libnrnmech.dylib",
+            )
+            # path2 = os.path.join(
+            #     os.path.dirname(__file__),
+            #     f"tmp/{name}/{platform.machine()}/libcorenrnmech.dylib",
+            # )
+
+            coreneuron.enable = True
+            # h.nrn_load_dll(path2)
+            h.nrn_load_dll(path1)
+            # neuron.load_mechanisms(path)
+
+
+
             print(f"... done.")
+            # import os
         else:
             print_err()
 
@@ -990,7 +1010,7 @@ class NeuronSimTree(PhysTree):
             h.CVode().active(0)
             h.cvode.cache_efficient(1)
             coreneuron.enable = True
-            _export_coreneuron_model()
+            # _export_coreneuron_model()
             # pc = h.ParallelContext()
             # pc.set_maxstep(10) # Set global step for parallel communication
             h.finitialize(self.v_init)

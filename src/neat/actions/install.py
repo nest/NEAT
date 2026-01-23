@@ -22,9 +22,11 @@
 import os
 import sys
 import glob
+import stat
 import shutil
 import inspect
 import platform
+from pathlib import Path
 import importlib
 import subprocess
 try:
@@ -161,7 +163,171 @@ def _resolve_model_name(model_name, channel_path_arg):
     return model_name
 
 
+
+def get_local_bin_dir():
+    """
+    Get the most local bin directory based on the active environment.
+    Priority order:
+    1. Conda environment bin
+    2. Virtual environment bin (venv/virtualenv)
+    3. Docker container /usr/local/bin (if in container)
+    4. ~/.local/bin (fallback)
+    
+    Returns:
+        Path: The bin directory to use
+    """
+    
+    # 1. Check for conda environment
+    conda_prefix = os.environ.get('CONDA_PREFIX')
+    if conda_prefix:
+        bin_dir = Path(conda_prefix) / 'bin'
+        if bin_dir.exists() and bin_dir.is_dir():
+            env_name = os.environ.get('CONDA_DEFAULT_ENV', 'unknown')
+            print(f"📦 Detected conda environment: {env_name}")
+            return bin_dir
+    
+    # 2. Check for virtual environment (venv/virtualenv)
+    virtual_env = os.environ.get('VIRTUAL_ENV')
+    if virtual_env:
+        bin_dir = Path(virtual_env) / 'bin'
+        if bin_dir.exists() and bin_dir.is_dir():
+            print(f"🐍 Detected Python virtual environment")
+            return bin_dir
+    
+    # 3. Check if running in Docker container
+    if os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER'):
+        # In Docker, prefer /usr/local/bin for system-wide access
+        bin_dir = Path('/usr/local/bin')
+        if os.access(bin_dir, os.W_OK):
+            print(f"🐳 Detected Docker container")
+            print(f"   Using system bin (writable): {bin_dir}")
+            return bin_dir
+        else:
+            # If /usr/local/bin is not writable, fall back to user location
+            print(f"🐳 Detected Docker container")
+            print(f"   /usr/local/bin not writable, using user bin")
+    
+    # 4. Fallback to ~/.local/bin
+    print(f"ℹ️  No specific environment detected")
+    return Path.home() / ".local" / "bin"
+
+
+def create_nrnspecial_wrapper(special_path, wrapper_name="python_with_my_nrn_model", install_dir=None):
+    """
+    Create a wrapper script for running Python with NEURON + CoreNEURON mechanisms
+    
+    Args:
+        special_path: Path to the 'special' executable (e.g., /path/to/arm64/special)
+        wrapper_name: Name for the wrapper script
+        install_dir: Directory to install wrapper (default: auto-detect environment)
+    """
+    
+    # Set default install directory based on environment
+    if install_dir is None:
+        install_dir = get_local_bin_dir()
+        print(f"   Using directory: {install_dir}")
+        print()
+    else:
+        install_dir = Path(install_dir)
+        print(f"Using specified directory: {install_dir}")
+        print()
+    
+    # Convert special_path to Path object and resolve to absolute path
+    special_path = Path(special_path).resolve()
+    
+    # Check if special executable exists
+    if not special_path.exists():
+        print(f"Error: special executable not found at {special_path}", file=sys.stderr)
+        sys.exit(1)
+    
+    if not special_path.is_file():
+        print(f"Error: {special_path} is not a file", file=sys.stderr)
+        sys.exit(1)
+    
+    # Create install directory if it doesn't exist
+    if not install_dir.exists():
+        print(f"Creating directory: {install_dir}")
+        try:
+            install_dir.mkdir(parents=True, exist_ok=True)
+            print(f"✓ Created {install_dir}")
+            print()
+        except PermissionError:
+            print(f"Error: Permission denied creating {install_dir}", file=sys.stderr)
+            print(f"Try running with sudo or choose a different directory", file=sys.stderr)
+            sys.exit(1)
+    
+    # Check write permissions
+    if not os.access(install_dir, os.W_OK):
+        print(f"Error: No write permission for {install_dir}", file=sys.stderr)
+        print(f"Try running with sudo or choose a different directory", file=sys.stderr)
+        sys.exit(1)
+    
+    # Path for the wrapper script
+    wrapper_path = install_dir / wrapper_name
+    
+    # Wrapper script content
+    wrapper_content = f"""#!/bin/bash
+# Wrapper to run Python scripts with NEURON + CoreNEURON mechanisms
+# Auto-generated wrapper for: {special_path}
+
+SPECIAL_PATH="{special_path}"
+
+# Check if special exists
+if [ ! -f "$SPECIAL_PATH" ]; then
+    echo "Error: special executable not found at $SPECIAL_PATH" >&2
+    exit 1
+fi
+
+# Run special with -python flag and pass all arguments
+exec "$SPECIAL_PATH" -python "$@"
+"""
+    # Write the wrapper script
+    try:
+        with open(wrapper_path, 'w') as f:
+            f.write(wrapper_content)
+        
+        # Make it executable (chmod +x)
+        wrapper_path.chmod(wrapper_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        
+        print(f"✓ Created wrapper at: {wrapper_path}")
+        print()
+        
+        # Check if install_dir is in PATH
+        path_dirs = os.environ.get('PATH', '').split(':')
+        if str(install_dir) in path_dirs:
+            print(f"✓ {install_dir} is already in your PATH")
+        else:
+            print(f"⚠ Warning: {install_dir} is not in your current PATH")
+            
+            # Provide context-specific advice
+            if os.environ.get('CONDA_PREFIX'):
+                print(f"   This is unusual for an active conda environment.")
+                print(f"   Try: conda deactivate && conda activate {os.environ.get('CONDA_DEFAULT_ENV')}")
+            elif os.environ.get('VIRTUAL_ENV'):
+                print(f"   This is unusual for an active virtual environment.")
+                print(f"   Try deactivating and reactivating your environment.")
+            elif os.path.exists('/.dockerenv'):
+                print(f"   Add to your Dockerfile or docker run command:")
+                print(f'   ENV PATH="{install_dir}:$PATH"')
+            else:
+                print(f"   Add to your ~/.bashrc or ~/.zshrc:")
+                print(f'   export PATH="{install_dir}:$PATH"')
+        
+        print()
+        print("Usage:")
+        print(f"  {wrapper_name} my_script.py")
+        print()
+        
+        return wrapper_path
+        
+    except Exception as e:
+        print(f"Error creating wrapper: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
+
+    print(f"path of this file: {__file__}   ")
 
     # combine `model_name` with the neuron compilation path
     path_for_neuron_compilation = os.path.join(
@@ -203,9 +369,17 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
     # # Also keep these for good measure
     # my_env["MAKEFLAGS"] = "-j1"
     if int(neuron.__version__.split(".")[0]) < 9:
-        subprocess.call(["nrnivmodl", "mech/"])  # compile all mod files
+        subprocess.call(["nrnivmodl", "-coreneuron", "mech/"])  # compile all mod files
     else:   
         subprocess.call(["nrnivmodl", "-coreneuron", "mech/"])  # compile all mod files
+
+    create_nrnspecial_wrapper(
+        special_path=os.path.join(
+            path_for_neuron_compilation,
+            f"{platform.machine()}/special",
+        ),
+        wrapper_name=f"python_with_{model_name}",
+    )
 
     print(
         f"\n------------------------------\n"

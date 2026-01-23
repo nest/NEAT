@@ -289,6 +289,8 @@ class TestNeuron:
         self.neurontree.store_locs(locs, name="rec locs")
         # run test simulation
         res = self.neurontree.run(1.0, record_from_channels=True, use_coreneuron=use_coreneuron)
+
+        print("!!!!!", res["chan"]["test_channel2"]["a00"])
         # check if results are stored correctly
         assert set(res["chan"]["test_channel2"].keys()) == {
             "a00",
@@ -350,7 +352,7 @@ class TestNeuron:
         assert res["chan"]["test_channel2"]["a11"].shape == (n_loc, n_step)
         assert res["chan"]["test_channel2"]["p_open"].shape == (n_loc, n_step)
 
-    def test_recording_timestep(self):
+    def test_recording_timestep(self,use_coreneuron=False):
         self.load_T_tree_test_channel()
         # set of locations
         locs = [(1, 0.5), (4, 0.5), (4, 1.0), (5, 0.5), (6, 0.5), (7, 0.5), (8, 0.5)]
@@ -1012,7 +1014,7 @@ class TestStimuli:
             seed=46,
         )
 
-        res = self.tree.run(self.tmax, record_from_iclamps=True)
+        res = self.tree.run(tmax, record_from_iclamps=True)
 
         mu_ou_empirical = np.mean(res['i_clamp'][0,:])
         cov_ou_empirical = np.cov(res['i_clamp'][0,:])
@@ -1065,6 +1067,7 @@ def debug_print(pstr):
         print(e)
 
 if __name__ == "__main__":
+    # sys.exit(pytest.main(sys.argv[1:]))
     tn = TestNeuron()
     # tn.test_passive(pplot=True)
     # tn.test_active(pplot=True)
