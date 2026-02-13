@@ -372,7 +372,7 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
     # # Also keep these for good measure
     # my_env["MAKEFLAGS"] = "-j1"
     if int(neuron.__version__.split(".")[0]) < 9:
-        subprocess.call(["nrnivmodl", "-coreneuron", "mech/"])  # compile all mod files
+        subprocess.call(["nrnivmodl", "mech/"])  # compile all mod files
     else:
         subprocess.call(["nrnivmodl", "-coreneuron", "mech/"])  # compile all mod files
 
@@ -388,7 +388,7 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
         f"\n------------------------------\n"
         f"The compiled .mod-files can be loaded into neuron using:\n"
         f'    neat.load_neuron_model("{model_name}")\n\n'
-        f"If you want to use the model with CoreNEURON, use:\n"
+        f"If you want to use the compiled .mod-files with CoreNEURON, use:\n"
         f"    python_with_{model_name} my_script.py \n"
         f"------------------------------\n"
     )
