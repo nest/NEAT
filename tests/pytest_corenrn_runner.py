@@ -35,10 +35,13 @@ args = [
     "-o", "norecursedirs=*",            # Override: don't recurse into any directories
     "-o", "log_cli=true",               # Override: enable CLI logging
     "-o", "log_cli_level=DEBUG",        # Override: set log level
-    "."                             # The target directory
+    "test_neurontree.py",               # target tests
+    "test_compartmentfitter.py",        # target tests
+    "test_compartmenttree.py",          # target tests
+    "test_concmechs.py",                # target tests
 ]
 
 # Manually run the pytest main function
 print(f"Running pytest from {sys.argv[2]}")
-exit_code = pytest.main(args)#"test_neurontree.py"])
+exit_code = pytest.main(args)#""])
 sys.exit(exit_code)
