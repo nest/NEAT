@@ -283,9 +283,6 @@ if [ ! -f "$SPECIAL_PATH" ]; then
     exit 1
 fi
 
-# Export environment variable to indicate NEURON was launched with special
-export NEURON_USING_SPECIAL=1
-
 # Run special with -python flag and pass all arguments
 exec "$SPECIAL_PATH" -python "$@"
 """

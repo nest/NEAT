@@ -19,26 +19,5 @@
 # You should have received a copy of the GNU General Public License
 # along with NEST.  If not, see <http://www.gnu.org/licenses/>.
 
-"""
-Launch this script as 
-```
+neatmodels install multichannel_test -s neuron -p channelcollection_for_tests.py
 python_with_multichannel_test pytest_corenrn_runner.py
-```
-to test coreneuron.
-"""
-
-import pytest
-import sys
-
-args = [
-    "-s",                               # Disable capturing (shortcut for --capture=no)
-    "-o", "norecursedirs=*",            # Override: don't recurse into any directories
-    "-o", "log_cli=true",               # Override: enable CLI logging
-    "-o", "log_cli_level=DEBUG",        # Override: set log level
-    "."                             # The target directory
-]
-
-# Manually run the pytest main function
-print(f"Running pytest from {sys.argv[2]}")
-exit_code = pytest.main(args)#"test_neurontree.py"])
-sys.exit(exit_code)

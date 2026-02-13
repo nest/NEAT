@@ -59,6 +59,7 @@ try:
     from .simulations.neuron.neuronmodel import NeuronSimTree
     from .simulations.neuron.neuronmodel import NeuronSimNode
     from .simulations.neuron.neuronmodel import NeuronCompartmentTree
+    from .simulations.neuron.neuronmodel import check_for_coreneuron
 except ModuleNotFoundError:
     warnings.warn("NEURON not available", UserWarning)
 

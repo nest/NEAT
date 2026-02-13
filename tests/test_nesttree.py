@@ -30,8 +30,7 @@ try:
     import nest
     import nest.lib.hl_api_exceptions as nestexceptions
 except ImportError as e:
-    # pytest.skip("NEST not installed", allow_module_level=True)
-    pass
+    pytest.skip("NEST not installed", allow_module_level=True)
 
 from neat import PhysTree
 from neat import CompartmentNode, CompartmentTree

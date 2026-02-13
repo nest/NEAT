@@ -32,13 +32,16 @@ from ...trees.phystree import PhysTree, PhysNode
 from ...trees.compartmenttree import CompartmentTree
 from ...factorydefaults import DefaultPhysiology
 
+
+def check_for_coreneuron():
+    return "CORENRN_PYTHONEXE" in os.environ
+
 try:
     import neuron
 
-    if (
-        "NEURON_USING_SPECIAL" in os.environ
-        and os.environ["NEURON_USING_SPECIAL"] == "1"
-    ):
+    if check_for_coreneuron():
+        # if we are running with the nrnspecial wrapper, we assume 
+        # that CoreNEURON is available and should be used
         from neuron import coreneuron
 
         coreneuron.enable = True
@@ -382,6 +385,10 @@ class NeuronSimTree(PhysTree):
         self.vecstims = []
         self.netcons = []
         self.vecs = []
+        try:
+            self.pc.done()
+        except AttributeError as e:
+            pass
         self.pc = None
         self.gid = None
         self.store_locs([{"node": 1, "x": 0.0}], "rec locs")
