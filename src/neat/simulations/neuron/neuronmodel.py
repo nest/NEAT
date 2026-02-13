@@ -36,11 +36,12 @@ from ...factorydefaults import DefaultPhysiology
 def check_for_coreneuron():
     return "CORENRN_PYTHONEXE" in os.environ
 
+
 try:
     import neuron
 
     if check_for_coreneuron():
-        # if we are running with the nrnspecial wrapper, we assume 
+        # if we are running with the nrnspecial wrapper, we assume
         # that CoreNEURON is available and should be used
         from neuron import coreneuron
 

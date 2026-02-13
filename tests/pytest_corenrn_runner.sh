@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# test_compartmentfitter.py
+# pytest_corenrn_runner.sh
 #
 # This file is part of NEST.
 #
