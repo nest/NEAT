@@ -325,11 +325,6 @@ exec "$SPECIAL_PATH" -python "$@"
                 print(f"   Add to your ~/.bashrc or ~/.zshrc:")
                 print(f'   export PATH="{install_dir}:$PATH"')
 
-        print()
-        print("Usage:")
-        print(f"  {wrapper_name} my_script.py")
-        print()
-
         return wrapper_path
 
     except Exception as e:
@@ -395,7 +390,9 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
     print(
         f"\n------------------------------\n"
         f"The compiled .mod-files can be loaded into neuron using:\n"
-        f'    neat.load_neuron_model("{model_name}")\n'
+        f'    neat.load_neuron_model("{model_name}")\n\n'
+        f"If you want to use the model with CoreNEURON, use:\n"
+        f"    python_with_{model_name} my_script.py \n"
         f"------------------------------\n"
     )
 
