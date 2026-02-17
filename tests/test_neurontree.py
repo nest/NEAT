@@ -1076,6 +1076,38 @@ class TestStimuli:
             ax.legend(loc=0)
             pl.show()
 
+    def test_input_spiketrain(self, pplot=False):
+        # parameter setup
+        dt = 0.1
+        tmax = 100.0
+        t_calibrate = 50.0
+        spktms1 = [10.0, 20.0, 40.0]
+        spktms2 = [15.0, 25.0, 45.0]
+
+        self._create_ball()
+        self.tree.init_model(t_calibrate=t_calibrate, dt=dt)
+        self.tree.add_double_exp_synapse(
+            loc=(1, 0.5),
+            tau1=.2, tau2=3., e_r=0.0
+        )
+        self.tree.add_double_exp_synapse(
+            loc=(1, 0.5),
+            tau1=.2, tau2=3., e_r=0.0
+        )
+        self.tree.set_spiketrain(0, .01, spktms1)
+        self.tree.set_spiketrain(1, .005, spktms2)
+        #     syn_idx=0,
+        #     spktms=spktms,
+        # )
+
+        res = self.tree.run(tmax)
+        self.tree.delete_model()
+
+        assert np.max(res['v_m'][0]) > res["v_m"][0, 0] + .1  # check for depolarization
+
+        if pplot:
+            pl.plot(res["t"], res["v_m"][0, :])
+            pl.show()
 
 def debug_print(pstr):
 
@@ -1094,11 +1126,11 @@ def debug_print(pstr):
 
 if __name__ == "__main__":
     # sys.exit(pytest.main(sys.argv[1:]))
-    tn = TestNeuron()
+    # tn = TestNeuron()
     # tn.test_passive(pplot=True)
     # tn.test_active(pplot=True)
     # tn.test_channel_recording()
-    tn.test_recording_timestep()
+    # tn.test_recording_timestep()
 
     # trn = TestReducedNeuron()
     # trn.test_geometry1()
@@ -1106,6 +1138,7 @@ if __name__ == "__main__":
     # trn.test_geometry2()
     # trn.test_impedance_properties_2()
 
-    # ts = TestStimuli()
+    ts = TestStimuli()
     # ts.test_i_clamp(pplot=True)
     # ts.test_ou_processes()
+    ts.test_input_spiketrain(pplot=True)

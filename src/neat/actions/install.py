@@ -358,19 +358,7 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
 
     # change to directory where 'mech/' folder is located and compile the mechanisms
     os.chdir(path_for_neuron_compilation)
-    # with open(".noindex", "w") as f:  # prevent mac from indexing compiled files
-    #     pass
-    # subprocess.run(["mdutil", "-i", "off", path_for_neuron_compilation])
-    # if os.path.exists(f"{platform.machine()}/"):  # delete old compiled files if exist
-    #     shutil.rmtree(f"{platform.machine()}/")
-    print("!!!", os.getcwd())
-    # my_env = os.environ.copy()
-    # # This forces every sub-call to 'make' to append -j1, effectively
-    # # overriding the -j4 passed by the nrnivmodl wrapper.
-    # my_env["MAKE"] = "make -j1"
 
-    # # Also keep these for good measure
-    # my_env["MAKEFLAGS"] = "-j1"
     if int(neuron.__version__.split(".")[0]) < 9:
         subprocess.call(["nrnivmodl", "mech/"])  # compile all mod files
     else:

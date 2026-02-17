@@ -766,7 +766,7 @@ class NeuronSimTree(PhysTree):
         vecstim = h.VecStim()
         vecstim.play(spks_vec)
         netcon = h.NetCon(vecstim, self.syns[syn_index], 0, self.dt, syn_weight)
-        self.pc.cell(self.gid, netcon)
+        # self.pc.cell(self.gid, netcon)
         # store the objects
         self.vecs.append(spks_vec)
         self.vecstims.append(vecstim)
