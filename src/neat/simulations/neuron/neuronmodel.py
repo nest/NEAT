@@ -985,18 +985,20 @@ class NeuronSimTree(PhysTree):
         # simulate
         if pprint:
             print(">>> Simulating the NEURON model for " + str(t_max) + " ms. <<<")
-        start = time.process_time()
         if not USE_CORENEURON:
+            start = time.process_time()
             h.finitialize(self.v_init)
             h.continuerun(t_max + self.t_calibrate)
+            stop = time.process_time()
         else:
             h.CVode().active(0)
             h.cvode.cache_efficient(1)
             coreneuron.enable = True
+            start = time.process_time()
             h.finitialize(self.v_init)
-            self.pc.psolve(t_max + self.t_calibrate)  # Solve for 100 ms
+            self.pc.psolve(t_max + self.t_calibrate)
+            stop = time.process_time()
 
-        stop = time.process_time()
         if pprint:
             print(">>> Elapsed time: " + str(stop - start) + " seconds. <<<")
         runtime = stop - start
