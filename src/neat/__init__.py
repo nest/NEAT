@@ -70,6 +70,11 @@ try:
 except ModuleNotFoundError:
     warnings.warn("NEST not available", UserWarning)
 
+try:
+    from .simulations.dendrify.dendrifymodel import DendrifyCompartmentTree
+except ModuleNotFoundError:
+    warnings.warn("Dendrify not available", UserWarning)
+
 from .tools.kernelextraction import FourierQuadrature
 from .tools.kernelextraction import FourierTools
 from .tools.kernelextraction import Kernel

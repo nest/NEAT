@@ -1,0 +1,617 @@
+import numpy as np
+import sympy as sp
+from sympy.printing.pycode import PythonCodePrinter
+
+import re
+import warnings
+from typing import Dict, List, Optional, Tuple
+
+
+# ── Brian2 / Dendrify imports (optional at import time for type-checking) ──
+try:
+    from brian2.units import pF, nS, mV
+    _BRIAN2_AVAILABLE = True
+except ImportError:
+    _BRIAN2_AVAILABLE = False
+    warnings.warn(
+        "brian2 is not installed. DendrifyCompartmentTree requires brian2 "
+        "and dendrify to export models.",
+        ImportWarning,
+    )
+
+try:
+    from dendrify import Soma, Dendrite, NeuronModel
+    _DENDRIFY_AVAILABLE = True
+except ImportError:
+    _DENDRIFY_AVAILABLE = False
+    warnings.warn(
+        "dendrify is not installed. DendrifyCompartmentTree requires dendrify "
+        "to export models.",
+        ImportWarning,
+    )
+
+# ── NEAT import ──
+try:
+    from neat import CompartmentTree, CompartmentNode
+except ImportError:
+    # Allow the file to be read even without NEAT installed (e.g., for
+    # documentation purposes).  A runtime error will be raised later.
+    CompartmentTree = object
+    CompartmentNode = object
+
+# ---------------------------------------------------------------------------
+# Unit-conversion helpers
+# ---------------------------------------------------------------------------
+
+# NEAT internal units  →  Brian2 units
+# ca  : uF   → pF  (× 1e6)
+# g   : uS   → nS  (× 1e3)
+# e   : mV   → mV  (unchanged, just attach the Brian2 unit)
+
+
+def _uF_to_pF(val_uF: float):
+    """Convert capacitance from NEAT's µF to Brian2 pF."""
+    return float(val_uF) * 1e6 * pF          # 1 µF = 1e6 pF
+
+
+def _uS_to_nS(val_uS: float):
+    """Convert conductance from NEAT's µS to Brian2 nS."""
+    return float(val_uS) * 1e3 * nS          # 1 µS = 1e3 nS
+
+
+def _mV(val_mV: float):
+    """Attach Brian2 mV unit."""
+    return float(val_mV) * mV
+
+
+# ---------------------------------------------------------------------------
+# Main class
+# ---------------------------------------------------------------------------
+
+
+class DendrifyCompartmentTree(CompartmentTree):
+    """
+    DendrifyCompartmentTree
+    =======================
+
+    A subclass of `neat.CompartmentTree` that exports reduced multi-compartmental
+    neuron models — specified as electrical compartments with coupling conductances —
+    to the Dendrify toolbox for simulation with Brian2.
+
+    Dendrify is designed around *dimensionless* compartments (absolute capacitance
+    and conductance), which maps onto the NEAT compartment representation
+    where each node carries:
+
+        node.ca       – capacitance  [uF]   (absolute, not specific)
+        node.g_c      – coupling conductance to parent [uS]
+        node.currents – dict  {channel_name: [g_bar (uS), e_rev (mV)]}
+
+    Units map to Brian2 / Dendrify units:
+        1 uF  -> 1e-6 * farad  -> 1e6 * pF
+        1 uS  -> 1e-6 * siemens -> 1e3 * nS
+        1 mV  -> 1e-3 * volt
+
+    Ion channel kinetics translation
+    ---------------------------------
+    NEAT's IonChannel class specifies gating kinetics as Python string expressions
+    in the variable ``v`` (membrane voltage in mV). Each channel defines:
+
+        channel.p_open  – open-probability formula, e.g. ``'m**3 * h'``
+
+    and *one* of the two rate parameterisations:
+
+        channel.alpha / channel.beta
+            dict {gate_var: rate_string(v)}  — transition rates in [1/ms]
+
+        channel.tauinf / channel.varinf
+            dict {gate_var: formula_string(v)}  — time constant [ms] and
+            steady-state activation [dimensionless]
+
+    This module translates either form into proper Brian2 ODEs.  Because Brian2
+    works in SI units while NEAT uses mV for membrane voltage, every occurrence
+    of the symbol ``v`` in a NEAT formula is substituted by ``(V_<comp>/mV)``
+    so that the numeric mV value is correctly passed to the expression.
+
+    When a channel's ``IonChannel`` object is available (via ``channel_storage``),
+    full Hodgkin-Huxley kinetics are generated.  When only the fitted ``g_bar``
+    and ``e_rev`` from the CompartmentTree are available (fallback), a simpler
+    constant-conductance current is emitted with a UserWarning.
+
+    Requirements
+    ------------
+        pip install nest-neat dendrify brian2
+
+    Usage example
+    -------------
+        import neat
+        from dendrify_compartment_tree import DendrifyCompartmentTree
+
+        # Build/load a CompartmentTree the usual NEAT way, e.g.:
+        ctree = neat.CompartmentTree(...)
+        ...  # fit parameters
+
+        # Wrap it — pass the channel_storage dict so full kinetics are emitted
+        dtree = DendrifyCompartmentTree(ctree, channel_storage=ctree.channel_storage)
+
+        # Get the Dendrify NeuronModel
+        model = dtree.get_neuron_model(soma_model='leakyIF')
+
+        # Build a Brian2 NeuronGroup
+        neuron = model.make_neurongroup(
+            N=1,
+            threshold='V_soma > -40*mV',
+            reset='V_soma = -70*mV',
+            method='euler',
+        )
+    """
+
+    def __init__(self, arg=None, channel_storage: Optional[Dict[str, "IonChannel"]] = None):
+        super().__init__(arg)
+        self._channel_storage = channel_storage or {}
+
+    def get_compartment_objects(self, soma_model: str = "leakyIF"):
+        """
+        Build Dendrify :class:`~dendrify.Soma` / :class:`~dendrify.Dendrite`
+        objects for every node in the tree.
+
+        Parameters
+        ----------
+        soma_model : str, optional
+            The soma model keyword passed to :class:`~dendrify.Soma`.
+            Defaults to ``'leakyIF'``.  Other options provided by Dendrify
+            include ``'adaptiveIF'`` and ``'adex'``.
+
+        Returns
+        -------
+        compartments : dict[int, Soma | Dendrite]
+            Mapping from node index to Dendrify compartment object.
+        """
+        compartments: dict = {}
+
+        for node in self:          # iterates in tree order (root first)
+            self._validate_node_params(node)
+
+            name = self._node_name(node)
+            c_abs = _uF_to_pF(node.ca)     # absolute capacitance
+            gl_abs = _uS_to_nS(node.currents['L'][0])   # absolute leak conductance
+            v_leak = _mV(node.currents['L'][1])         # leak reversal potential
+
+            if node.index == self.root.index:
+                # Root node → soma
+                comp = Soma(
+                    name,
+                    model=soma_model,
+                    cm_abs=c_abs,
+                    gl_abs=gl_abs,
+                    v_rest=v_leak,
+                )
+            else:
+                # Non-root nodes → dendrites (passive by default)
+                comp = Dendrite(
+                    name,
+                    model="passive",
+                    cm_abs=c_abs,
+                    gl_abs=gl_abs,
+                    v_rest=v_leak,
+                )
+
+            # Add non-leak active channels as constant-conductance currents
+            self._add_active_channels(comp, node, name)
+
+            compartments[node.index] = comp
+
+        return compartments
+
+    def get_connections(self, compartments: dict):
+        """
+        Build the list of ``(parent, child, g_coupling)`` tuples required by
+        :class:`~dendrify.NeuronModel`.
+
+        Parameters
+        ----------
+        compartments : dict[int, Soma | Dendrite]
+            As returned by :meth:`get_compartment_objects`.
+
+        Returns
+        -------
+        connections : list[tuple]
+            Each element is ``(parent_comp, child_comp, g_coupling_nS)``.
+        """
+        connections = []
+
+        for node in self:
+            if node.index == self.root.index:
+                continue   # root has no parent
+            if not np.isfinite(node.g_c) or node.g_c <= 0:
+                raise ValueError(
+                    f"Node {node.index} has an unphysical coupling conductance "
+                    f"g_c={node.g_c} µS. Is the tree fully fitted?"
+                )
+            g_c_nS = _uS_to_nS(node.g_c)
+            connections.append(
+                (compartments[node.parent_node.index], compartments[node.index], g_c_nS)
+            )
+
+        return connections
+
+    def get_neuron_model(
+        self,
+        soma_model: str = "leakyIF",
+        v_rest: Optional[float] = None,
+    ) -> "NeuronModel":
+        """
+        Construct and return a Dendrify :class:`~dendrify.NeuronModel` from
+        the compartment tree.
+
+        This is the primary convenience method.  It:
+
+        1. Creates Dendrify :class:`~dendrify.Soma` / :class:`~dendrify.Dendrite`
+           objects for every node.
+        2. Wires them together using the coupling conductances stored in the tree.
+        3. Wraps everything in a :class:`~dendrify.NeuronModel`.
+
+        Parameters
+        ----------
+        soma_model : str, optional
+            Soma model keyword (``'leakyIF'``, ``'adaptiveIF'``, ``'adex'``).
+        v_rest : float, optional
+            Global resting potential override in **mV**.  If ``None`` (default),
+            each compartment uses its own ``node.e_eq`` value.
+
+        Returns
+        -------
+        model : dendrify.NeuronModel
+            Ready to call ``model.make_neurongroup(...)``.
+
+        Example
+        -------
+        >>> dtree = DendrifyCompartmentTree(fitted_ctree)
+        >>> model = dtree.get_neuron_model(soma_model='leakyIF')
+        >>> neuron = model.make_neurongroup(
+        ...     N=200,
+        ...     threshold='V_soma > -40*mV',
+        ...     reset='V_soma = -70*mV',
+        ...     method='euler',
+        ... )
+        """
+        compartments = self.get_compartment_objects(soma_model=soma_model)
+        connections = self.get_connections(compartments)
+
+        if not connections:
+            raise ValueError(
+                "The CompartmentTree has only one compartment.  "
+                "Consider using dendrify.PointNeuronModel instead."
+            )
+
+        kwargs = {}
+        if v_rest is not None:
+            kwargs["v_rest"] = _mV(v_rest)
+
+        model = NeuronModel(connections, **kwargs)
+        return model
+
+    def print_summary(self):
+        """
+        Print a human-readable summary of each compartment's parameters as
+        they will be exported to Dendrify.
+        """
+        print(f"{'node':>5}  {'name':>15}  {'Ca (pF)':>10}  "
+              f"{'gl (nS)':>10}  {'e_eq (mV)':>10}  {'g_c (nS)':>10}  "
+              f"active channels")
+        print("-" * 80)
+        for node in self:
+            name = self._node_name(node)
+            ca_pF = node.ca * 1e6
+            gl_nS = node.g_l * 1e3
+            gc_nS = node.g_c * 1e3
+            active = [k for k in node.currents if k != "L"]
+            print(
+                f"{node.index:>5}  {name:>15}  {ca_pF:>10.3f}  "
+                f"{gl_nS:>10.3f}  {node.e_eq:>10.2f}  {gc_nS:>10.3f}  "
+                f"{active or '—'}"
+            )
+
+    def _node_name(self, node: "CompartmentNode") -> str:
+        """
+        Return a clean, Dendrify-compatible name for a node.
+
+        Dendrify uses the compartment name as a suffix in variable names
+        (e.g., ``V_soma``, ``C_dend``), so it must be a valid Python
+        identifier and must be unique within the model.
+
+        The root node is always named ``'soma'`` so that Dendrify's
+        ``V_soma`` threshold/reset strings work out of the box.
+        """
+        if node.index == self.root.index:
+            return "soma"
+        if node.loc_idx is not None:
+            return f"dend{node.index}"
+        return f"dend{node.index}"
+
+    @staticmethod
+    def _validate_node_params(node: "CompartmentNode"):
+        """
+        Raise a descriptive ValueError if a node's fitted parameters are
+        unphysical.  This guards against accidentally passing an unfitted
+        tree, where ``ca``, ``g_l``, or ``e_eq`` may be zero, negative,
+        or NaN — any of which would cause Dendrify to silently fall back
+        to its morphological (length/diameter) pathway and raise a
+        confusing ``DimensionlessCompartmentError`` at connection time.
+        """
+        errs = []
+        if not np.isfinite(node.ca) or node.ca <= 0:
+            errs.append(f"ca={node.ca} µF (must be finite and > 0)")
+        if not np.isfinite(node.currents['L'][0]) or node.currents['L'][0] < 0:
+            errs.append(f"g_l={node.currents['L'][0]} µS (must be finite and ≥ 0)")
+        if not np.isfinite(node.e_eq):
+            errs.append(f"e_eq={node.e_eq} mV (must be finite)")
+        if errs:
+            raise ValueError(
+                f"Node {node.index} has unphysical parameters — is the tree "
+                f"fully fitted?\n  " + "\n  ".join(errs)
+            )
+
+    def _add_active_channels(
+        self,
+        comp,
+        node: "CompartmentNode",
+        comp_name: str,
+    ):
+        """
+        Translate every non-leak active channel on *node* into Brian2 equations
+        and inject them into the Dendrify compartment *comp*.
+
+        For each channel the method tries, in order:
+
+        1. Look up the :class:`~neat.IonChannel` object in
+           ``self._channel_storage``.  If found, emit full HH kinetics
+           (gate ODEs + conductance-based current).
+        2. If the channel object is not available, fall back to a constant-
+           conductance current and emit a :class:`UserWarning`.
+        """
+        active_channels = {
+            k: v
+            for k, v in node.currents.items()
+            if k != "L"
+        }
+        if not active_channels:
+            return
+
+        all_eqs: List[str] = []
+        all_params: Dict[str, object] = {}
+        current_terms: List[str] = []
+
+        for chan_name, (g_bar_uS, e_rev_mV) in active_channels.items():
+            ion_channel = self._channel_storage[chan_name]
+
+            if ion_channel is not None:
+                eqs, params, i_term = self._hh_equations(
+                    ion_channel, chan_name, comp_name, g_bar_uS, e_rev_mV,
+                )
+            else:
+                warnings.warn(
+                    f"IonChannel object for '{chan_name}' not found in "
+                    f"channel_storage.  Falling back to a constant-conductance "
+                    f"current for compartment '{comp_name}'.  Pass "
+                    f"channel_storage=ctree.channel_storage to DendrifyCompartmentTree "
+                    f"to get full Hodgkin-Huxley kinetics.",
+                    UserWarning,
+                )
+                eqs, params, i_term = self._constant_g_equations(
+                    chan_name, comp_name, g_bar_uS, e_rev_mV,
+                )
+
+            all_eqs.extend(eqs)
+            all_params.update(params)
+            current_terms.append(i_term)
+
+        if all_eqs:
+            comp.add_equations("\n".join(all_eqs))
+
+            # Wire all channel currents into the compartment's total current.
+            I_total = f"I_{comp_name}"
+            I_new_terms = " + ".join(current_terms)
+            try:
+                comp.replace_equations(
+                    f"{I_total} =",
+                    f"{I_total} = {I_new_terms} +",
+                )
+            except Exception:
+                warnings.warn(
+                    f"Could not automatically wire channel currents "
+                    f"({list(active_channels)}) into the total current of "
+                    f"compartment '{comp_name}'.  You may need to do this manually.",
+                    UserWarning,
+                )
+
+            if hasattr(comp, "add_params"):
+                comp.add_params(all_params)
+            else:
+                for k, v in all_params.items():
+                    setattr(comp, k, v)
+
+    def _hh_equations(
+        self,
+        ion_channel,
+        chan_name: str,
+        comp_name: str,
+        g_bar_uS: float,
+        e_rev_mV: float,
+    ) -> Tuple[List[str], dict, str]:
+        """
+        Build full Hodgkin-Huxley Brian2 equations from a NEAT IonChannel.
+
+        Returns ``(equation_lines, params_dict, current_variable_name)``.
+
+        Gate variables are namespaced as ``<gate>_<chan>_<comp>`` to avoid
+        clashes when the same channel type appears on multiple compartments.
+
+        Sympy translation
+        ~~~~~~~~~~~~~~~~~
+        NEAT stores its rate/steady-state formulas as **sympy expressions**
+        (parsed from the user-supplied strings at ``define()`` time).
+        Calling ``str()`` on a sympy expression yields sympy's own dialect —
+        ``Piecewise(...)``, ``exp(...)``, ``Abs(...)``, ``Rational(1,2)`` etc.
+        — which Brian2's string parser cannot understand.
+
+        The correct workflow is therefore:
+
+        1. Work entirely at the sympy level: substitute the sympy symbol ``v``
+           (NEAT's voltage symbol, in mV) with the Brian2 voltage expression
+           ``V_<comp>/mV`` (itself a sympy expression) using ``.subs()``.
+        2. Similarly substitute every gate symbol ``x`` with its namespaced
+           counterpart ``x_<chan>_<comp>``.
+        3. Print the resulting sympy expression to a valid Python string using
+           :class:`sympy.printing.pycode.PythonCodePrinter`, which maps sympy
+           functions to their Python/math equivalents (``exp``, ``tanh``,
+           ``Abs`` → ``abs``, ``Piecewise`` → ternary ``if/else`` chain).
+
+        Voltage translation
+        ~~~~~~~~~~~~~~~~~~~
+        NEAT formulas use a bare ``v`` in **mV**.  Brian2 voltages carry SI
+        units (volts).  Substituting ``v`` → ``V_<comp>/mV`` gives Brian2 the
+        correct dimensionless mV value inside the formula.
+
+        Rate / time-constant units
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~
+        *alpha/beta* rates from NEAT are in **1/ms**.  Brian2's ODE integrator
+        works in 1/s, so the RHS is divided by ``ms``::
+
+            dx/dt = (alpha*(1-x) - beta*x) / ms : 1
+
+        *tauinf* time constants are in **ms**, so the denominator is multiplied
+        by ``ms``::
+
+            dx/dt = (xinf - x) / (taux * ms) : 1
+        """
+        # Brian2-compatible printer: maps sympy functions to Python builtins.
+        # Piecewise is rendered as a Python conditional expression chain.
+        printer = PythonCodePrinter()
+
+        eqs: List[str] = []
+        params: dict = {}
+
+        V_var = f"V_{comp_name}"
+
+        # ── identify gate variables and parameterisation ──────────────────────
+        if hasattr(ion_channel, "alpha") and ion_channel.alpha:
+            gates = list(ion_channel.alpha.keys())
+            use_alpha_beta = True
+        elif hasattr(ion_channel, "tauinf") and ion_channel.tauinf:
+            gates = list(ion_channel.tauinf.keys())
+            use_alpha_beta = False
+        else:
+            # No gating variables — purely ohmic channel.
+            return self._constant_g_equations(
+                chan_name, comp_name, g_bar_uS, e_rev_mV
+            )
+
+        # ── build sympy substitution map ──────────────────────────────────────
+        # NEAT's canonical voltage symbol is sp.Symbol('v').
+        v_sym   = sp.Symbol("v")
+        # The Brian2 expression for membrane voltage in mV (dimensionless float
+        # inside Brian2's equation strings).
+        v_brian = sp.Symbol(f"({V_var}/mV)")   # treated as an opaque symbol
+
+        # Gate symbols: each bare gate name → namespaced Brian2 name
+        gate_subs = {
+            sp.Symbol(str(gate)): sp.Symbol(f"{gate}_{chan_name}_{comp_name}")
+            for gate in gates
+        }
+
+        def _to_brian2_str(sympy_expr) -> str:
+            """
+            Given a sympy expression from NEAT (with ``v`` in mV and raw gate
+            symbols), return a Brian2-readable Python string with:
+              • ``v``   → ``(V_<comp>/mV)``   (dimensionless mV numeric value)
+              • ``<g>`` → ``<g>_<chan>_<comp>`` for every gate variable
+            """
+            # Step 1: substitute at the sympy level — safe and exact.
+            expr = sympy_expr.subs(v_sym, v_brian)
+            expr = expr.subs(gate_subs)
+            # Step 2: print to Python string via PythonCodePrinter.
+            #   • exp(x)       → math.exp(x)  — strip "math." prefix below
+            #   • Abs(x)       → abs(x)
+            #   • Piecewise    → (val1 if cond1 else val2 if cond2 else val3)
+            #   • Rational(1,2)→ 1/2
+            #   • Integer(n)   → n  (plain int literal)
+            code = printer.doprint(expr)
+            # PythonCodePrinter prefixes math functions with "math."; Brian2
+            # expects bare names (it has its own math namespace).
+            code = re.sub(r"\bmath\.", "", code)
+            return code
+
+        # ── p_open expression ─────────────────────────────────────────────────
+        # p_open is a sympy expression in the gate symbols only (no v).
+        p_open_brian = printer.doprint(
+            ion_channel.p_open.subs(gate_subs)
+        )
+        p_open_brian = re.sub(r"\bmath\.", "", p_open_brian)
+
+        # ── current and conductance variables ─────────────────────────────────
+        I_var    = f"I_{chan_name}_{comp_name}"
+        gbar_var = f"gbar_{chan_name}_{comp_name}"
+        E_var    = f"E_{chan_name}_{comp_name}"
+
+        params[gbar_var] = _uS_to_nS(g_bar_uS)
+        params[E_var]    = _mV(e_rev_mV)
+
+        # Conductance-based current (nS × V = nA → amp, correct Brian2 SI)
+        eqs.append(
+            f"{I_var} = {gbar_var} * ({p_open_brian}) "
+            f"* ({E_var} - {V_var}) : amp"
+        )
+
+        # ── gate variable ODEs ────────────────────────────────────────────────
+        for gate in gates:
+            g_ns = f"{gate}_{chan_name}_{comp_name}"   # namespaced gate var
+
+            if use_alpha_beta:
+                alpha_str = _to_brian2_str(ion_channel.alpha[gate])
+                beta_str  = _to_brian2_str(ion_channel.beta[gate])
+                alpha_var = f"alpha_{g_ns}"
+                beta_var  = f"beta_{g_ns}"
+
+                eqs.append(
+                    f"d{g_ns}/dt = ({alpha_var} * (1 - {g_ns}) "
+                    f"- {beta_var} * {g_ns}) / ms : 1"
+                )
+                eqs.append(f"{alpha_var} = {alpha_str} : 1")
+                eqs.append(f"{beta_var}  = {beta_str}  : 1")
+
+            else:  # tauinf / varinf
+                tauinf_str = _to_brian2_str(ion_channel.tauinf[gate])
+                varinf_str = _to_brian2_str(ion_channel.varinf[gate])
+                xinf_var   = f"xinf_{g_ns}"
+                taux_var   = f"taux_{g_ns}"
+
+                eqs.append(
+                    f"d{g_ns}/dt = ({xinf_var} - {g_ns}) "
+                    f"/ ({taux_var} * ms) : 1"
+                )
+                eqs.append(f"{xinf_var} = {varinf_str} : 1")
+                eqs.append(f"{taux_var} = {tauinf_str} : 1")
+
+        return eqs, params, I_var
+
+    @staticmethod
+    def _constant_g_equations(
+        chan_name: str,
+        comp_name: str,
+        g_bar_uS: float,
+        e_rev_mV: float,
+    ) -> Tuple[List[str], dict, str]:
+        """
+        Fallback: frozen (constant-conductance) ohmic current.
+
+        Used when the IonChannel object is unavailable, or when the channel
+        carries no gating variables.
+        """
+        I_var    = f"I_{chan_name}_{comp_name}"
+        gbar_var = f"gbar_{chan_name}_{comp_name}"
+        E_var    = f"E_{chan_name}_{comp_name}"
+        V_var    = f"V_{comp_name}"
+
+        eqs    = [f"{I_var} = {gbar_var} * ({E_var} - {V_var}) : amp"]
+        params = {gbar_var: _uS_to_nS(g_bar_uS), E_var: _mV(e_rev_mV)}
+        return eqs, params, I_var
