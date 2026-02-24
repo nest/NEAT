@@ -9,7 +9,7 @@ from .brian2model import _sympy_to_brian2_str
 
 # ── Brian2 / Dendrify imports (optional at import time for type-checking) ──
 try:
-    from brian2.units import pF, nS, mV
+    from brian2.units import pF, nS, mV, uS, uF
     _BRIAN2_AVAILABLE = True
 except ImportError:
     _BRIAN2_AVAILABLE = False
@@ -29,36 +29,6 @@ except ImportError:
         "to export models.",
         ImportWarning,
     )
-
-# ---------------------------------------------------------------------------
-# Unit-conversion helpers
-# ---------------------------------------------------------------------------
-
-# NEAT internal units  →  Brian2 units
-# ca  : uF   → pF  (× 1e6)
-# g   : uS   → nS  (× 1e3)
-# e   : mV   → mV  (unchanged, just attach the Brian2 unit)
-
-
-def _uF_to_pF(val_uF: float):
-    """Convert capacitance from NEAT's µF to Brian2 pF."""
-    return float(val_uF) * 1e6 * pF          # 1 µF = 1e6 pF
-
-
-def _uS_to_nS(val_uS: float):
-    """Convert conductance from NEAT's µS to Brian2 nS."""
-    return float(val_uS) * 1e3 * nS          # 1 µS = 1e3 nS
-
-
-def _mV(val_mV: float):
-    """Attach Brian2 mV unit."""
-    return float(val_mV) * mV
-
-
-# ---------------------------------------------------------------------------
-# Equation generation helpers
-# ---------------------------------------------------------------------------
-
 
 def ion_channel_dendrify_eqs(
     ion_channel,
@@ -110,8 +80,8 @@ def ion_channel_dendrify_eqs(
     gbar_var = f"gbar_{chan_name}_{comp_name}"
     E_var = f"E_{chan_name}_{comp_name}"
 
-    params[gbar_var] = _uS_to_nS(g_bar_uS)
-    params[E_var] = _mV(e_rev_mV)
+    params[gbar_var] = g_bar_uS * uS
+    params[E_var] = e_rev_mV * mV
 
     eqs.append(
         f"{I_var} = {gbar_var} * ({p_open_brian}) "
@@ -251,39 +221,27 @@ class DendrifyCompartmentTree(CompartmentTree):
 
         for node in self:          # iterates in tree order (root first)
             self._validate_node_params(node)
-
             name = self._node_name(node)
-            c_abs = _uF_to_pF(node.ca)     # absolute capacitance
-            gl_abs = _uS_to_nS(node.currents['L'][0])   # absolute leak conductance
-            v_leak = _mV(node.currents['L'][1])         # leak reversal potential
 
             if self.is_root(node):
                 # Root node → soma
                 comp = Soma(
                     name,
                     model=soma_model,
-                    cm_abs=c_abs,
-                    gl_abs=gl_abs,
-                    v_rest=v_leak,
+                    cm_abs=node.ca * uF, 
+                    gl_abs=node.currents['L'][0] * uS, 
+                    v_rest=node.currents['L'][1] * mV, 
                 )
             else:
                 # Non-root nodes → dendrites (passive by default)
                 comp = Dendrite(
                     name,
                     model="passive",
-                    cm_abs=c_abs,
-                    gl_abs=gl_abs,
-                    v_rest=v_leak,
+                    cm_abs=node.ca * uF,
+                    gl_abs=node.currents['L'][0] * uS, 
+                    v_rest=node.currents['L'][1] * mV, 
                 )
-
-                if not np.isfinite(node.g_c) or node.g_c <= 0:
-                    raise ValueError(
-                        f"Node {node.index} has an unphysical coupling conductance "
-                        f"g_c={node.g_c} µS. Is the tree fully fitted?"
-                    )
-                g_c_nS = _uS_to_nS(node.g_c)
-                connections.append((compartments[node.parent_node.index], comp, g_c_nS))
-                # comp.connect(compartments[node.parent_node.index], g_c_nS)
+                connections.append((compartments[node.parent_node.index], comp, node.g_c * uS))
 
             # Add non-leak active channels as constant-conductance currents
             self._add_active_channels(comp, node, name)
@@ -291,34 +249,6 @@ class DendrifyCompartmentTree(CompartmentTree):
             compartments[node.index] = comp
 
         return compartments, connections
-
-    # def get_connections(self, compartments: dict):
-    #     """
-    #     Build the list of ``(parent, child, g_coupling)`` tuples required by
-    #     :class:`~dendrify.NeuronModel`.
-
-    #     Parameters
-    #     ----------
-    #     compartments : dict[int, Soma | Dendrite]
-    #         As returned by :meth:`get_compartment_objects`.
-
-    #     Returns
-    #     -------
-    #     connections : list[tuple]
-    #         Each element is ``(parent_comp, child_comp, g_coupling_nS)``.
-    #     """
-    #     connections = []
-
-    #     for node in self:
-    #         if node.index == self.root.index:
-    #             continue   # root has no parent
-         
-    #         g_c_nS = _uS_to_nS(node.g_c)
-    #         connections.append(
-    #             (compartments[node.parent_node.index], compartments[node.index], g_c_nS)
-    #         )
-
-    #     return connections
 
     def init_model(
         self,
