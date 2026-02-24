@@ -1924,7 +1924,7 @@ class CompartmentTree(STree):
         fake_r_a=100.0 * 1e-6,
         factor_r_a=1e-6,
         delta=1e-14,
-        method=2,
+        method="neuron2",
     ):
         """
         Computes a fake geometry so that the neuron model is a reduced
@@ -1938,6 +1938,7 @@ class CompartmentTree(STree):
         fake_r_a: float [MOhm * cm]
             fake axial resistivity value, used to evaluate the lengths of each
             section to yield the correct coupling constants
+        method: str ('neuron1', 'neuron2', or 'brian2')
 
         Returns
         -------
@@ -1951,13 +1952,13 @@ class CompartmentTree(STree):
             If the node indices are not ordered consecutively when iterating
         """
         assert self.check_ordered()
-        factor_r = 1.0 / np.sqrt(factor_r_a)
         # compute necessary vectors for calculating
         surfaces = np.array([node.ca / fake_c_m for node in self])
         vec_coupling = np.array(
             [1.0] + [1.0 / node.g_c for node in self if node.parent_node is not None]
         )
-        if method == 1:
+        if method == "neuron1":
+            factor_r = 1.0 / np.sqrt(factor_r_a)
             # find the 3d points to construct the segments' geometry
             p0s = -surfaces
             p1s = np.zeros_like(p0s)
@@ -1981,12 +1982,38 @@ class CompartmentTree(STree):
                 points.append([point0, point1, point2, point3])
 
             return points, surfaces
-        elif method == 2:
+        elif method == "neuron2":
             radii = np.cbrt(fake_r_a * surfaces / (vec_coupling * (2.0 * np.pi) ** 2))
             lengths = surfaces / (2.0 * np.pi * radii)
             return lengths, radii
+        elif method == "brian2":
+            # solver that reverse engineers the geometry from the coupling constants and surfaces
+            # to follow Brain2's SpatialNeuron conventions
+            aux_mat = np.zeros((len(self), len(self)))
+            for node in self:
+                if node.parent_node is not None:
+                    ii, jj = node.index, node.parent_node.index
+                    aux_mat[ii, ii] = 1.0
+                    aux_mat[ii, jj] = 1.0
+                else:
+                    aux_mat[node.index, node.index] = 1.0
+
+            sol = np.linalg.solve(aux_mat, vec_coupling)
+
+            radii = np.cbrt(fake_r_a * surfaces / (4.0 * np.pi**2 * sol))
+            lengths = surfaces / (2.0 * np.pi * radii)
+
+            #---- test
+            g_a = np.pi * radii**2 / (fake_r_a * lengths/2)
+            g_b = np.pi * radii**2 / (fake_r_a * lengths/2)
+            g_c = 1 / (1 / g_a[1:] + 1 / g_b[:-1])
+            g_c_ = 1. / vec_coupling
+            # -----
+            # radii = np.cbrt(fake_r_a * surfaces / (vec_coupling * (2.0 * np.pi) ** 2))
+            # lengths = surfaces / (4.0 * np.pi * radii) 
+            return lengths, radii
         else:
-            raise ValueError("Invalid `method` argument, should be 1 or 2")
+            raise ValueError(f"Invalid `method` argument (provided `{method}`), choose from 'neuron1', 'neuron2' or 'brian2'")
 
     def plot_dendrogram(
         self,

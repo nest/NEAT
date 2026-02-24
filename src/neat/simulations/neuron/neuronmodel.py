@@ -1417,7 +1417,7 @@ class NeuronCompartmentTree(NeuronSimTree):
     derived.
     """
 
-    def __init__(self, ctree, fake_c_m=1.0, fake_r_a=100.0 * 1e-6, method=2):
+    def __init__(self, ctree, fake_c_m=1.0, fake_r_a=100.0 * 1e-6):
 
         try:
             assert issubclass(ctree.__class__, CompartmentTree)
@@ -1432,11 +1432,11 @@ class NeuronCompartmentTree(NeuronSimTree):
             ctree,
             fake_c_m=fake_c_m,
             fake_r_a=fake_r_a,
-            method=method,
+            method='neuron2',
         )
 
     def _create_reduced_neuron_model(
-        self, ctree, fake_c_m=1.0, fake_r_a=100.0 * 1e-6, method=2
+        self, ctree, fake_c_m=1.0, fake_r_a=100.0 * 1e-6, method='neuron2'
     ):
         # calculate geometry that will lead to correct constants
         arg1, arg2 = ctree.compute_fake_geometry(
@@ -1446,7 +1446,7 @@ class NeuronCompartmentTree(NeuronSimTree):
             delta=1e-10,
             method=method,
         )
-        if method == 1:
+        if method == 'neuron1':
             points = arg1
             surfaces = arg2
             for ii, comp_node in enumerate(ctree):
@@ -1469,7 +1469,7 @@ class NeuronCompartmentTree(NeuronSimTree):
                 sim_node.c_m = fake_c_m
                 sim_node.r_a = fake_r_a
                 sim_node.content["points_3d"] = points[comp_node.index]
-        elif method == 2:
+        elif method == 'neuron2':
             lengths = arg1
             radii = arg2
             surfaces = 2.0 * np.pi * radii * lengths
@@ -1493,6 +1493,10 @@ class NeuronCompartmentTree(NeuronSimTree):
                     chan: [g / surfaces[comp_node.index], e]
                     for chan, (g, e) in comp_node.currents.items()
                 }
+
+                print(f"sim node {sim_node.index} > radius: {sim_node.R}, length: {sim_node.L} um" )#
+                print(f"             > currents: {sim_node.currents}")
+
                 sim_node.concmechs = copy.deepcopy(comp_node.concmechs)
                 for concmech in sim_node.concmechs.values():
                     concmech.gamma *= surfaces[comp_node.index] * 1e6

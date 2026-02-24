@@ -72,6 +72,7 @@ except ModuleNotFoundError:
 
 try:
     from .simulations.dendrify.dendrifymodel import DendrifyCompartmentTree
+    from .simulations.dendrify.brian2model import Brian2CompartmentTree
 except ModuleNotFoundError:
     warnings.warn("Dendrify not available", UserWarning)
 

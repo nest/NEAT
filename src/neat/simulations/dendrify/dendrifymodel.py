@@ -1,10 +1,10 @@
 import numpy as np
 import sympy as sp
-from sympy.printing.pycode import PythonCodePrinter
-
-import re
 import warnings
 from typing import Dict, List, Optional, Tuple
+
+from ...trees.compartmenttree import CompartmentTree, CompartmentNode
+from .brian2model import _sympy_to_brian2_str
 
 
 # ── Brian2 / Dendrify imports (optional at import time for type-checking) ──
@@ -29,15 +29,6 @@ except ImportError:
         "to export models.",
         ImportWarning,
     )
-
-# ── NEAT import ──
-try:
-    from neat import CompartmentTree, CompartmentNode
-except ImportError:
-    # Allow the file to be read even without NEAT installed (e.g., for
-    # documentation purposes).  A runtime error will be raised later.
-    CompartmentTree = object
-    CompartmentNode = object
 
 # ---------------------------------------------------------------------------
 # Unit-conversion helpers
@@ -65,8 +56,97 @@ def _mV(val_mV: float):
 
 
 # ---------------------------------------------------------------------------
-# Main class
+# Equation generation helpers
 # ---------------------------------------------------------------------------
+
+
+def ion_channel_dendrify_eqs(
+    ion_channel,
+    chan_name: str,
+    comp_name: str,
+    g_bar_uS: float,
+    e_rev_mV: float,
+) -> Tuple[List[str], dict, str]:
+    """
+    Build full Hodgkin-Huxley Brian2 equations from a NEAT IonChannel.
+
+    Returns ``(equation_lines, params_dict, current_variable_name)``.
+
+    Gate variables are namespaced as ``<gate>_<chan>_<comp>`` to avoid
+    clashes when the same channel type appears on multiple compartments.
+    """
+    eqs: List[str] = []
+    params: dict = {}
+
+    V_var = f"V_{comp_name}"
+
+    if hasattr(ion_channel, "alpha") and ion_channel.alpha:
+        gates = list(ion_channel.alpha.keys())
+        use_alpha_beta = True
+    elif hasattr(ion_channel, "tauinf") and ion_channel.tauinf:
+        gates = list(ion_channel.tauinf.keys())
+        use_alpha_beta = False
+    else:
+        raise ValueError(
+            f"IonChannel '{chan_name}' has neither alpha/beta nor tauinf/varinf definitions."
+        )
+
+    v_sym = sp.Symbol("v")
+    v_brian = sp.Symbol(f"({V_var}/mV)")
+    gate_subs = {
+        sp.Symbol(str(gate)): sp.Symbol(f"{gate}_{chan_name}_{comp_name}")
+        for gate in gates
+    }
+
+    def _to_brian2_str(sympy_expr, substitute_v=True) -> str:
+        expr = sympy_expr.subs(gate_subs)
+        if substitute_v:
+            expr = expr.subs(v_sym, v_brian)
+        return _sympy_to_brian2_str(expr)
+
+    p_open_brian = _to_brian2_str(ion_channel.p_open, substitute_v=False)
+
+    I_var = f"I_{chan_name}_{comp_name}"
+    gbar_var = f"gbar_{chan_name}_{comp_name}"
+    E_var = f"E_{chan_name}_{comp_name}"
+
+    params[gbar_var] = _uS_to_nS(g_bar_uS)
+    params[E_var] = _mV(e_rev_mV)
+
+    eqs.append(
+        f"{I_var} = {gbar_var} * ({p_open_brian}) "
+        f"* ({E_var} - {V_var}) : amp"
+    )
+
+    for gate in gates:
+        g_ns = f"{gate}_{chan_name}_{comp_name}"
+
+        if use_alpha_beta:
+            alpha_str = _to_brian2_str(ion_channel.alpha[gate])
+            beta_str = _to_brian2_str(ion_channel.beta[gate])
+            alpha_var = f"alpha_{g_ns}"
+            beta_var = f"beta_{g_ns}"
+
+            eqs.append(
+                f"d{g_ns}/dt = ({alpha_var} * (1 - {g_ns}) "
+                f"- {beta_var} * {g_ns}) / ms : 1"
+            )
+            eqs.append(f"{alpha_var} = {alpha_str} : 1")
+            eqs.append(f"{beta_var}  = {beta_str}  : 1")
+        else:
+            tauinf_str = _to_brian2_str(ion_channel.tauinf[gate])
+            varinf_str = _to_brian2_str(ion_channel.varinf[gate])
+            xinf_var = f"xinf_{g_ns}"
+            taux_var = f"taux_{g_ns}"
+
+            eqs.append(
+                f"d{g_ns}/dt = ({xinf_var} - {g_ns}) "
+                f"/ ({taux_var} * ms) : 1"
+            )
+            eqs.append(f"{xinf_var} = {varinf_str} : 1")
+            eqs.append(f"{taux_var} = {tauinf_str} : 1")
+
+    return eqs, params, I_var
 
 
 class DendrifyCompartmentTree(CompartmentTree):
@@ -134,7 +214,7 @@ class DendrifyCompartmentTree(CompartmentTree):
         dtree = DendrifyCompartmentTree(ctree, channel_storage=ctree.channel_storage)
 
         # Get the Dendrify NeuronModel
-        model = dtree.get_neuron_model(soma_model='leakyIF')
+        model = dtree.init_model(soma_model='leakyIF')
 
         # Build a Brian2 NeuronGroup
         neuron = model.make_neurongroup(
@@ -167,6 +247,7 @@ class DendrifyCompartmentTree(CompartmentTree):
             Mapping from node index to Dendrify compartment object.
         """
         compartments: dict = {}
+        connections: list = []
 
         for node in self:          # iterates in tree order (root first)
             self._validate_node_params(node)
@@ -176,7 +257,7 @@ class DendrifyCompartmentTree(CompartmentTree):
             gl_abs = _uS_to_nS(node.currents['L'][0])   # absolute leak conductance
             v_leak = _mV(node.currents['L'][1])         # leak reversal potential
 
-            if node.index == self.root.index:
+            if self.is_root(node):
                 # Root node → soma
                 comp = Soma(
                     name,
@@ -195,46 +276,51 @@ class DendrifyCompartmentTree(CompartmentTree):
                     v_rest=v_leak,
                 )
 
+                if not np.isfinite(node.g_c) or node.g_c <= 0:
+                    raise ValueError(
+                        f"Node {node.index} has an unphysical coupling conductance "
+                        f"g_c={node.g_c} µS. Is the tree fully fitted?"
+                    )
+                g_c_nS = _uS_to_nS(node.g_c)
+                connections.append((compartments[node.parent_node.index], comp, g_c_nS))
+                # comp.connect(compartments[node.parent_node.index], g_c_nS)
+
             # Add non-leak active channels as constant-conductance currents
             self._add_active_channels(comp, node, name)
 
             compartments[node.index] = comp
 
-        return compartments
+        return compartments, connections
 
-    def get_connections(self, compartments: dict):
-        """
-        Build the list of ``(parent, child, g_coupling)`` tuples required by
-        :class:`~dendrify.NeuronModel`.
+    # def get_connections(self, compartments: dict):
+    #     """
+    #     Build the list of ``(parent, child, g_coupling)`` tuples required by
+    #     :class:`~dendrify.NeuronModel`.
 
-        Parameters
-        ----------
-        compartments : dict[int, Soma | Dendrite]
-            As returned by :meth:`get_compartment_objects`.
+    #     Parameters
+    #     ----------
+    #     compartments : dict[int, Soma | Dendrite]
+    #         As returned by :meth:`get_compartment_objects`.
 
-        Returns
-        -------
-        connections : list[tuple]
-            Each element is ``(parent_comp, child_comp, g_coupling_nS)``.
-        """
-        connections = []
+    #     Returns
+    #     -------
+    #     connections : list[tuple]
+    #         Each element is ``(parent_comp, child_comp, g_coupling_nS)``.
+    #     """
+    #     connections = []
 
-        for node in self:
-            if node.index == self.root.index:
-                continue   # root has no parent
-            if not np.isfinite(node.g_c) or node.g_c <= 0:
-                raise ValueError(
-                    f"Node {node.index} has an unphysical coupling conductance "
-                    f"g_c={node.g_c} µS. Is the tree fully fitted?"
-                )
-            g_c_nS = _uS_to_nS(node.g_c)
-            connections.append(
-                (compartments[node.parent_node.index], compartments[node.index], g_c_nS)
-            )
+    #     for node in self:
+    #         if node.index == self.root.index:
+    #             continue   # root has no parent
+         
+    #         g_c_nS = _uS_to_nS(node.g_c)
+    #         connections.append(
+    #             (compartments[node.parent_node.index], compartments[node.index], g_c_nS)
+    #         )
 
-        return connections
+    #     return connections
 
-    def get_neuron_model(
+    def init_model(
         self,
         soma_model: str = "leakyIF",
         v_rest: Optional[float] = None,
@@ -266,7 +352,7 @@ class DendrifyCompartmentTree(CompartmentTree):
         Example
         -------
         >>> dtree = DendrifyCompartmentTree(fitted_ctree)
-        >>> model = dtree.get_neuron_model(soma_model='leakyIF')
+        >>> model = dtree.init_model(soma_model='leakyIF')
         >>> neuron = model.make_neurongroup(
         ...     N=200,
         ...     threshold='V_soma > -40*mV',
@@ -274,14 +360,9 @@ class DendrifyCompartmentTree(CompartmentTree):
         ...     method='euler',
         ... )
         """
-        compartments = self.get_compartment_objects(soma_model=soma_model)
-        connections = self.get_connections(compartments)
+        compartments, connections = self.get_compartment_objects(soma_model=soma_model)
+        print(connections)
 
-        if not connections:
-            raise ValueError(
-                "The CompartmentTree has only one compartment.  "
-                "Consider using dendrify.PointNeuronModel instead."
-            )
 
         kwargs = {}
         if v_rest is not None:
@@ -361,13 +442,9 @@ class DendrifyCompartmentTree(CompartmentTree):
         Translate every non-leak active channel on *node* into Brian2 equations
         and inject them into the Dendrify compartment *comp*.
 
-        For each channel the method tries, in order:
-
-        1. Look up the :class:`~neat.IonChannel` object in
-           ``self._channel_storage``.  If found, emit full HH kinetics
-           (gate ODEs + conductance-based current).
-        2. If the channel object is not available, fall back to a constant-
-           conductance current and emit a :class:`UserWarning`.
+        For each channel, look up the :class:`~neat.IonChannel` object in
+        ``self._channel_storage`` and emit full HH kinetics (gate ODEs +
+        conductance-based current).
         """
         active_channels = {
             k: v
@@ -380,26 +457,17 @@ class DendrifyCompartmentTree(CompartmentTree):
         all_eqs: List[str] = []
         all_params: Dict[str, object] = {}
         current_terms: List[str] = []
-
         for chan_name, (g_bar_uS, e_rev_mV) in active_channels.items():
-            ion_channel = self._channel_storage[chan_name]
+            ion_channel = self._channel_storage.get(chan_name)
+            if ion_channel is None:
+                raise KeyError(
+                    f"IonChannel object for '{chan_name}' not found in channel_storage. "
+                    f"Pass channel_storage=ctree.channel_storage to DendrifyCompartmentTree."
+                )
 
-            if ion_channel is not None:
-                eqs, params, i_term = self._hh_equations(
-                    ion_channel, chan_name, comp_name, g_bar_uS, e_rev_mV,
-                )
-            else:
-                warnings.warn(
-                    f"IonChannel object for '{chan_name}' not found in "
-                    f"channel_storage.  Falling back to a constant-conductance "
-                    f"current for compartment '{comp_name}'.  Pass "
-                    f"channel_storage=ctree.channel_storage to DendrifyCompartmentTree "
-                    f"to get full Hodgkin-Huxley kinetics.",
-                    UserWarning,
-                )
-                eqs, params, i_term = self._constant_g_equations(
-                    chan_name, comp_name, g_bar_uS, e_rev_mV,
-                )
+            eqs, params, i_term = ion_channel_dendrify_eqs(
+                ion_channel, chan_name, comp_name, g_bar_uS, e_rev_mV,
+            )
 
             all_eqs.extend(eqs)
             all_params.update(params)
@@ -413,8 +481,8 @@ class DendrifyCompartmentTree(CompartmentTree):
             I_new_terms = " + ".join(current_terms)
             try:
                 comp.replace_equations(
-                    f"{I_total} =",
-                    f"{I_total} = {I_new_terms} +",
+                    f"{I_total} = I_ext_{comp.name}",
+                    f"{I_total} = I_ext_{comp.name} + {I_new_terms}",
                 )
             except Exception:
                 warnings.warn(
@@ -430,188 +498,3 @@ class DendrifyCompartmentTree(CompartmentTree):
                 for k, v in all_params.items():
                     setattr(comp, k, v)
 
-    def _hh_equations(
-        self,
-        ion_channel,
-        chan_name: str,
-        comp_name: str,
-        g_bar_uS: float,
-        e_rev_mV: float,
-    ) -> Tuple[List[str], dict, str]:
-        """
-        Build full Hodgkin-Huxley Brian2 equations from a NEAT IonChannel.
-
-        Returns ``(equation_lines, params_dict, current_variable_name)``.
-
-        Gate variables are namespaced as ``<gate>_<chan>_<comp>`` to avoid
-        clashes when the same channel type appears on multiple compartments.
-
-        Sympy translation
-        ~~~~~~~~~~~~~~~~~
-        NEAT stores its rate/steady-state formulas as **sympy expressions**
-        (parsed from the user-supplied strings at ``define()`` time).
-        Calling ``str()`` on a sympy expression yields sympy's own dialect —
-        ``Piecewise(...)``, ``exp(...)``, ``Abs(...)``, ``Rational(1,2)`` etc.
-        — which Brian2's string parser cannot understand.
-
-        The correct workflow is therefore:
-
-        1. Work entirely at the sympy level: substitute the sympy symbol ``v``
-           (NEAT's voltage symbol, in mV) with the Brian2 voltage expression
-           ``V_<comp>/mV`` (itself a sympy expression) using ``.subs()``.
-        2. Similarly substitute every gate symbol ``x`` with its namespaced
-           counterpart ``x_<chan>_<comp>``.
-        3. Print the resulting sympy expression to a valid Python string using
-           :class:`sympy.printing.pycode.PythonCodePrinter`, which maps sympy
-           functions to their Python/math equivalents (``exp``, ``tanh``,
-           ``Abs`` → ``abs``, ``Piecewise`` → ternary ``if/else`` chain).
-
-        Voltage translation
-        ~~~~~~~~~~~~~~~~~~~
-        NEAT formulas use a bare ``v`` in **mV**.  Brian2 voltages carry SI
-        units (volts).  Substituting ``v`` → ``V_<comp>/mV`` gives Brian2 the
-        correct dimensionless mV value inside the formula.
-
-        Rate / time-constant units
-        ~~~~~~~~~~~~~~~~~~~~~~~~~~
-        *alpha/beta* rates from NEAT are in **1/ms**.  Brian2's ODE integrator
-        works in 1/s, so the RHS is divided by ``ms``::
-
-            dx/dt = (alpha*(1-x) - beta*x) / ms : 1
-
-        *tauinf* time constants are in **ms**, so the denominator is multiplied
-        by ``ms``::
-
-            dx/dt = (xinf - x) / (taux * ms) : 1
-        """
-        # Brian2-compatible printer: maps sympy functions to Python builtins.
-        # Piecewise is rendered as a Python conditional expression chain.
-        printer = PythonCodePrinter()
-
-        eqs: List[str] = []
-        params: dict = {}
-
-        V_var = f"V_{comp_name}"
-
-        # ── identify gate variables and parameterisation ──────────────────────
-        if hasattr(ion_channel, "alpha") and ion_channel.alpha:
-            gates = list(ion_channel.alpha.keys())
-            use_alpha_beta = True
-        elif hasattr(ion_channel, "tauinf") and ion_channel.tauinf:
-            gates = list(ion_channel.tauinf.keys())
-            use_alpha_beta = False
-        else:
-            # No gating variables — purely ohmic channel.
-            return self._constant_g_equations(
-                chan_name, comp_name, g_bar_uS, e_rev_mV
-            )
-
-        # ── build sympy substitution map ──────────────────────────────────────
-        # NEAT's canonical voltage symbol is sp.Symbol('v').
-        v_sym   = sp.Symbol("v")
-        # The Brian2 expression for membrane voltage in mV (dimensionless float
-        # inside Brian2's equation strings).
-        v_brian = sp.Symbol(f"({V_var}/mV)")   # treated as an opaque symbol
-
-        # Gate symbols: each bare gate name → namespaced Brian2 name
-        gate_subs = {
-            sp.Symbol(str(gate)): sp.Symbol(f"{gate}_{chan_name}_{comp_name}")
-            for gate in gates
-        }
-
-        def _to_brian2_str(sympy_expr) -> str:
-            """
-            Given a sympy expression from NEAT (with ``v`` in mV and raw gate
-            symbols), return a Brian2-readable Python string with:
-              • ``v``   → ``(V_<comp>/mV)``   (dimensionless mV numeric value)
-              • ``<g>`` → ``<g>_<chan>_<comp>`` for every gate variable
-            """
-            # Step 1: substitute at the sympy level — safe and exact.
-            expr = sympy_expr.subs(v_sym, v_brian)
-            expr = expr.subs(gate_subs)
-            # Step 2: print to Python string via PythonCodePrinter.
-            #   • exp(x)       → math.exp(x)  — strip "math." prefix below
-            #   • Abs(x)       → abs(x)
-            #   • Piecewise    → (val1 if cond1 else val2 if cond2 else val3)
-            #   • Rational(1,2)→ 1/2
-            #   • Integer(n)   → n  (plain int literal)
-            code = printer.doprint(expr)
-            # PythonCodePrinter prefixes math functions with "math."; Brian2
-            # expects bare names (it has its own math namespace).
-            code = re.sub(r"\bmath\.", "", code)
-            return code
-
-        # ── p_open expression ─────────────────────────────────────────────────
-        # p_open is a sympy expression in the gate symbols only (no v).
-        p_open_brian = printer.doprint(
-            ion_channel.p_open.subs(gate_subs)
-        )
-        p_open_brian = re.sub(r"\bmath\.", "", p_open_brian)
-
-        # ── current and conductance variables ─────────────────────────────────
-        I_var    = f"I_{chan_name}_{comp_name}"
-        gbar_var = f"gbar_{chan_name}_{comp_name}"
-        E_var    = f"E_{chan_name}_{comp_name}"
-
-        params[gbar_var] = _uS_to_nS(g_bar_uS)
-        params[E_var]    = _mV(e_rev_mV)
-
-        # Conductance-based current (nS × V = nA → amp, correct Brian2 SI)
-        eqs.append(
-            f"{I_var} = {gbar_var} * ({p_open_brian}) "
-            f"* ({E_var} - {V_var}) : amp"
-        )
-
-        # ── gate variable ODEs ────────────────────────────────────────────────
-        for gate in gates:
-            g_ns = f"{gate}_{chan_name}_{comp_name}"   # namespaced gate var
-
-            if use_alpha_beta:
-                alpha_str = _to_brian2_str(ion_channel.alpha[gate])
-                beta_str  = _to_brian2_str(ion_channel.beta[gate])
-                alpha_var = f"alpha_{g_ns}"
-                beta_var  = f"beta_{g_ns}"
-
-                eqs.append(
-                    f"d{g_ns}/dt = ({alpha_var} * (1 - {g_ns}) "
-                    f"- {beta_var} * {g_ns}) / ms : 1"
-                )
-                eqs.append(f"{alpha_var} = {alpha_str} : 1")
-                eqs.append(f"{beta_var}  = {beta_str}  : 1")
-
-            else:  # tauinf / varinf
-                tauinf_str = _to_brian2_str(ion_channel.tauinf[gate])
-                varinf_str = _to_brian2_str(ion_channel.varinf[gate])
-                xinf_var   = f"xinf_{g_ns}"
-                taux_var   = f"taux_{g_ns}"
-
-                eqs.append(
-                    f"d{g_ns}/dt = ({xinf_var} - {g_ns}) "
-                    f"/ ({taux_var} * ms) : 1"
-                )
-                eqs.append(f"{xinf_var} = {varinf_str} : 1")
-                eqs.append(f"{taux_var} = {tauinf_str} : 1")
-
-        return eqs, params, I_var
-
-    @staticmethod
-    def _constant_g_equations(
-        chan_name: str,
-        comp_name: str,
-        g_bar_uS: float,
-        e_rev_mV: float,
-    ) -> Tuple[List[str], dict, str]:
-        """
-        Fallback: frozen (constant-conductance) ohmic current.
-
-        Used when the IonChannel object is unavailable, or when the channel
-        carries no gating variables.
-        """
-        I_var    = f"I_{chan_name}_{comp_name}"
-        gbar_var = f"gbar_{chan_name}_{comp_name}"
-        E_var    = f"E_{chan_name}_{comp_name}"
-        V_var    = f"V_{comp_name}"
-
-        eqs    = [f"{I_var} = {gbar_var} * ({E_var} - {V_var}) : amp"]
-        params = {gbar_var: _uS_to_nS(g_bar_uS), E_var: _mV(e_rev_mV)}
-        return eqs, params, I_var
