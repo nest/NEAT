@@ -986,18 +986,18 @@ class NeuronSimTree(PhysTree):
         if pprint:
             print(">>> Simulating the NEURON model for " + str(t_max) + " ms. <<<")
         if not USE_CORENEURON:
-            start = time.process_time()
             h.finitialize(self.v_init)
+            start = time.perf_counter()
             h.continuerun(t_max + self.t_calibrate)
-            stop = time.process_time()
+            stop = time.perf_counter()
         else:
             h.CVode().active(0)
             h.cvode.cache_efficient(1)
             coreneuron.enable = True
-            start = time.process_time()
             h.finitialize(self.v_init)
+            start = time.perf_counter()
             self.pc.psolve(t_max + self.t_calibrate)
-            stop = time.process_time()
+            stop = time.perf_counter()
 
         if pprint:
             print(">>> Elapsed time: " + str(stop - start) + " seconds. <<<")
@@ -1493,10 +1493,6 @@ class NeuronCompartmentTree(NeuronSimTree):
                     chan: [g / surfaces[comp_node.index], e]
                     for chan, (g, e) in comp_node.currents.items()
                 }
-
-                print(f"sim node {sim_node.index} > radius: {sim_node.R}, length: {sim_node.L} um" )#
-                print(f"             > currents: {sim_node.currents}")
-
                 sim_node.concmechs = copy.deepcopy(comp_node.concmechs)
                 for concmech in sim_node.concmechs.values():
                     concmech.gamma *= surfaces[comp_node.index] * 1e6

@@ -20,7 +20,7 @@ except ImportError:
     )
 
 try:
-    from dendrify import Soma, Dendrite, NeuronModel
+    from dendrify import Soma, Dendrite, NeuronModel, PointNeuronModel
     _DENDRIFY_AVAILABLE = True
 except ImportError:
     _DENDRIFY_AVAILABLE = False
@@ -250,6 +250,68 @@ class DendrifyCompartmentTree(CompartmentTree):
 
         return compartments, connections
 
+    def _build_point_model(self, soma_model: str = "leakyIF", v_rest: Optional[float] = None):
+        """
+        Build a soma-only model while preserving multicompartment naming
+        conventions (V_soma, I_ext_soma) expected by existing calling code.
+        """
+        soma_node = self.root
+        v_rest_q = soma_node.currents["L"][1] * mV if v_rest is None else v_rest * mV
+
+        model = PointNeuronModel(
+            model=soma_model,
+            cm_abs=soma_node.ca * uF,
+            gl_abs=soma_node.currents["L"][0] * uS,
+            v_rest=v_rest_q,
+        )
+
+        # Keep variable names consistent with multicompartment Dendrify API.
+        model._equations = model._equations.replace("I = I_ext  :amp", "I = I_ext_soma  :amp")
+        model._equations = model._equations.replace("I = I_ext :amp", "I = I_ext_soma :amp")
+        model._equations = model._equations.replace("I_ext  :amp", "I_ext_soma  :amp")
+        model._equations = model._equations.replace("I_ext :amp", "I_ext_soma :amp")
+        if "V_soma" not in model._equations:
+            model._equations += "\nV_soma = V : volt"
+
+        active_channels = {k: v for k, v in soma_node.currents.items() if k != "L"}
+        if active_channels:
+            eq_lines: List[str] = []
+            params: Dict[str, object] = {}
+            current_terms: List[str] = []
+
+            for chan_name, (g_bar_uS, e_rev_mV) in active_channels.items():
+                ion_channel = self._channel_storage.get(chan_name)
+                if ion_channel is None:
+                    raise KeyError(
+                        f"IonChannel object for '{chan_name}' not found in channel_storage. "
+                        "Pass channel_storage=ctree.channel_storage to DendrifyCompartmentTree."
+                    )
+
+                chan_eqs, chan_params, chan_i = ion_channel_dendrify_eqs(
+                    ion_channel,
+                    chan_name,
+                    "soma",
+                    g_bar_uS,
+                    e_rev_mV,
+                )
+                eq_lines.extend(chan_eqs)
+                params.update(chan_params)
+                current_terms.append(chan_i)
+
+            target = "I = I_ext_soma  :amp"
+            replacement = f"I = I_ext_soma + {' + '.join(current_terms)}  :amp"
+            if target in model._equations:
+                model._equations = model._equations.replace(target, replacement)
+            else:
+                target = "I = I_ext_soma :amp"
+                replacement = f"I = I_ext_soma + {' + '.join(current_terms)} :amp"
+                model._equations = model._equations.replace(target, replacement)
+
+            model.add_equations("\n".join(eq_lines))
+            model.add_params(params)
+
+        return model
+
     def init_model(
         self,
         soma_model: str = "leakyIF",
@@ -291,12 +353,13 @@ class DendrifyCompartmentTree(CompartmentTree):
         ... )
         """
         compartments, connections = self.get_compartment_objects(soma_model=soma_model)
-        print(connections)
 
+        if len(compartments) == 1:
+            return self._build_point_model(soma_model=soma_model, v_rest=v_rest)
 
         kwargs = {}
         if v_rest is not None:
-            kwargs["v_rest"] = _mV(v_rest)
+            kwargs["v_rest"] = v_rest * mV
 
         model = NeuronModel(connections, **kwargs)
         return model

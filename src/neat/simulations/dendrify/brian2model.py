@@ -1,6 +1,8 @@
 import numpy as np
 import sympy as sp
 
+import warnings
+
 try:
     import brian2
     from brian2.units import (
@@ -397,7 +399,6 @@ class Brian2CompartmentTree(CompartmentTree):
             'e_rev_mV':     e_rev_mV,
             'norm':         norm,         # stored for use in Synapses on_pre
         }
-
 
     def _synapse_equations(self) -> Tuple[List[str], List[str], List[str]]:
         """
