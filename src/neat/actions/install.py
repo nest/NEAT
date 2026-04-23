@@ -294,8 +294,35 @@ if [ -n "$PRELOADED_MODEL" ]; then
     export CORENEURON_PRELOADED_MODEL="$PRELOADED_MODEL"
 fi
 
-# Run special with -python flag and pass all arguments
-exec "$SPECIAL_PATH" -python "$@"
+# Detect whether this process is part of an MPI launch.
+# We first key off MPI-specific size variables. For Slurm we additionally
+# require task context to avoid false positives in a plain allocation shell.
+USE_MPI=0
+for MPI_SIZE_VAR in OMPI_COMM_WORLD_SIZE PMI_SIZE PMIX_SIZE MV2_COMM_WORLD_SIZE; do
+    MPI_SIZE_VALUE="${{!MPI_SIZE_VAR:-}}"
+    if [[ "$MPI_SIZE_VALUE" =~ ^[0-9]+$ ]] && [ "$MPI_SIZE_VALUE" -gt 1 ]; then
+        USE_MPI=1
+        break
+    fi
+done
+
+if [ "$USE_MPI" -eq 0 ] && [ -n "${{SLURM_PROCID:-}}" ]; then
+    for SLURM_SIZE_VAR in SLURM_STEP_NUM_TASKS SLURM_NTASKS; do
+        SLURM_SIZE_VALUE="${{!SLURM_SIZE_VAR:-}}"
+        if [[ "$SLURM_SIZE_VALUE" =~ ^[0-9]+$ ]] && [ "$SLURM_SIZE_VALUE" -gt 1 ]; then
+            USE_MPI=1
+            break
+        fi
+    done
+fi
+
+# Run special with -python, and add -mpi only when the runtime indicates
+# a multi-rank launch.
+if [ "$USE_MPI" -eq 1 ]; then
+    exec "$SPECIAL_PATH" -mpi -python "$@"
+else
+    exec "$SPECIAL_PATH" -python "$@"
+fi
 """
     # Write the wrapper script
     try:
