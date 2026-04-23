@@ -335,6 +335,8 @@ class DendrifyCompartmentTree(CompartmentTree):
         v_rest : float, optional
             Global resting potential override in **mV**.  If ``None`` (default),
             each compartment uses its own ``node.e_eq`` value.
+        method : str
+            Brian2's integration method for the neuron
 
         Returns
         -------

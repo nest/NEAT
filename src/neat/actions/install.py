@@ -23,6 +23,7 @@ import os
 import sys
 import glob
 import stat
+import json
 import shutil
 import inspect
 import platform
@@ -213,7 +214,10 @@ def get_local_bin_dir():
 
 
 def create_nrnspecial_wrapper(
-    special_path, wrapper_name="python_with_my_nrn_model", install_dir=None
+    special_path,
+    wrapper_name="python_with_my_nrn_model",
+    install_dir=None,
+    preloaded_model=None,
 ):
     """
     Create a wrapper script for running Python with NEURON + CoreNEURON mechanisms
@@ -222,6 +226,7 @@ def create_nrnspecial_wrapper(
         special_path: Path to the 'special' executable (e.g., /path/to/arm64/special)
         wrapper_name: Name for the wrapper script
         install_dir: Directory to install wrapper (default: auto-detect environment)
+        preloaded_model: Name of the NEURON model preloaded by the wrapper
     """
 
     # Set default install directory based on environment
@@ -276,11 +281,17 @@ def create_nrnspecial_wrapper(
 # Auto-generated wrapper for: {special_path}
 
 SPECIAL_PATH="{special_path}"
+PRELOADED_MODEL="{preloaded_model or ''}"
 
 # Check if special exists
 if [ ! -f "$SPECIAL_PATH" ]; then
     echo "Error: special executable not found at $SPECIAL_PATH" >&2
     exit 1
+fi
+
+# Mark that this wrapper preloads a specific NEURON/CoreNEURON model.
+if [ -n "$PRELOADED_MODEL" ]; then
+    export CORENEURON_PRELOADED_MODEL="$PRELOADED_MODEL"
 fi
 
 # Run special with -python flag and pass all arguments
@@ -329,7 +340,7 @@ exec "$SPECIAL_PATH" -python "$@"
         sys.exit(1)
 
 
-def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
+def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None, codegen_opts=None):
 
     print(f"path of this file: {__file__}   ")
 
@@ -370,6 +381,7 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
             f"{platform.machine()}/special",
         ),
         wrapper_name=f"python_with_{model_name}",
+        preloaded_model=model_name,
     )
 
     print(
@@ -382,8 +394,10 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
     )
 
 
-def _compile_nest(model_name, path_neat, channels, path_nestresource=None, ions=["ca"]):
+def _compile_nest(model_name, path_neat, channels, path_nestresource=None, ions=["ca"], codegen_opts=None):
     from pynestml.frontend.pynestml_frontend import generate_nest_compartmental_target
+
+    print("!!! codegen_opts in _compile_nest:", codegen_opts)
 
     # assert that `model_name` is a pure name
     assert not "/" in model_name
@@ -430,7 +444,8 @@ def _compile_nest(model_name, path_neat, channels, path_nestresource=None, ions=
         input_path=nestml_file_path,
         target_path=path_for_nestml_compilation,
         module_name=model_name + "_module",
-        logging_level="DEBUG",
+        logging_level="INFO",
+        codegen_opts=codegen_opts,
     )
 
 
@@ -441,6 +456,7 @@ def _install_models(
     simulators=["neuron", "nest"],
     path_nestresource=None,
     path_neuronresource=None,
+    codegen_opts=None,
 ):
     """
     Compile a set of ion channels models specified by [channel_path_arg]
@@ -463,18 +479,31 @@ def _install_models(
         Optional path to a directory with .mod files, these modfiles will be
         copied to the NEURON install directory and compiled together with the
         generated channel .mod files
+    codegen_opts: dict
+        Extra options for code generation, passed as a JSON string. \n
+        Compartmental-specific options:
+        **NEST-specific options:**
+        - ``fp_precision``: ``"single"`` or ``"double"`` (default: ``"double"``).
+        - ``use_fastexp``: bool (default: ``False``). If ``True``, generated
+          code uses a fast polynomial approximation only for dynamic propagator
+          ``exp()`` terms in hot loops; all other exponentials use
+          ``std::exp``/``std::expf``.
     """
     model_name = _resolve_model_name(model_name, channel_path_arg)
 
     # collect the ion channels from the provide path arguments
     cpex = ChannelPathExtractor(path_neat, model_name)
     channels = cpex.collect_channels(*channel_path_arg)
+    codegen_opts = json.loads(codegen_opts) if codegen_opts else {}
 
     if "neuron" in simulators:
         _compile_neuron(
-            model_name, path_neat, channels, path_neuronresource=path_neuronresource
+            model_name, path_neat, channels, 
+            path_neuronresource=path_neuronresource,
+            codegen_opts=codegen_opts,
         )
     if "nest" in simulators:
         _compile_nest(
-            model_name, path_neat, channels, path_nestresource=path_nestresource
+            model_name, path_neat, channels, path_nestresource=path_nestresource,
+            codegen_opts=codegen_opts,
         )

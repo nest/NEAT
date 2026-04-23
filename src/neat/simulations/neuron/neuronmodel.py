@@ -34,7 +34,10 @@ from ...factorydefaults import DefaultPhysiology
 
 
 def check_for_coreneuron():
-    return "CORENRN_PYTHONEXE" in os.environ
+    return (
+        "CORENEURON_PRELOADED_MODEL" in os.environ
+        or "CORENRN_PYTHONEXE" in os.environ
+    )
 
 
 try:
