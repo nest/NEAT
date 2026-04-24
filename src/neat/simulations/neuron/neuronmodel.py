@@ -22,8 +22,10 @@
 import os
 import time
 import copy
+import json
 import warnings
 import platform
+import sys
 
 import numpy as np
 
@@ -108,6 +110,61 @@ except ModuleNotFoundError:
     np.array = array
 
 
+class NeuronMechanismLoadError(RuntimeError):
+    pass
+
+
+def _normalize_executable_path(path):
+    if path is None:
+        return None
+    return os.path.realpath(path)
+
+
+def _get_neuron_runtime_metadata():
+    return {
+        "neuron_version": neuron.__version__,
+        "python_version": platform.python_version(),
+        "python_executable": _normalize_executable_path(sys.executable),
+        "platform_system": platform.system(),
+        "platform_machine": platform.machine(),
+    }
+
+
+def _read_neuron_build_metadata(model_path):
+    metadata_path = os.path.join(model_path, "build_info.json")
+    if not os.path.exists(metadata_path):
+        raise NeuronMechanismLoadError(
+            f"NEURON model '{model_path}' is missing build metadata at "
+            f"'{metadata_path}'. Recompile the mechanisms with 'neatmodels install'."
+        )
+
+    with open(metadata_path, "r") as metadata_file:
+        return json.load(metadata_file)
+
+
+def _validate_neuron_build_metadata(model_path):
+    expected_metadata = _read_neuron_build_metadata(model_path)
+    runtime_metadata = _get_neuron_runtime_metadata()
+
+    mismatches = []
+    for key, runtime_value in runtime_metadata.items():
+        expected_value = expected_metadata.get(key)
+        if key == "python_executable":
+            expected_value = _normalize_executable_path(expected_value)
+        if expected_value != runtime_value:
+            mismatches.append(
+                f"{key}: built for '{expected_value}', current runtime is '{runtime_value}'"
+            )
+
+    if mismatches:
+        raise NeuronMechanismLoadError(
+            f"NEURON model '{model_path}' was built for a different runtime. "
+            f"Recompile the mechanisms with 'neatmodels install'. "
+            f"Mismatches: {'; '.join(mismatches)}"
+        )
+
+
+
 def load_neuron_model(name):
     def print_err():
         path_name = os.path.join(os.path.dirname(__file__), "tmp/")
@@ -118,28 +175,57 @@ def load_neuron_model(name):
             f"Installed models will be in '{path_name}'."
         )
 
+    def raise_load_err(path, err):
+        raise NeuronMechanismLoadError(
+            f"Failed to load NEURON mechanisms from '{path}'. "
+            f"This often means compiled mechanisms are incompatible with the "
+            f"active NEURON runtime. Original error: {err}"
+        ) from err
+
+    def should_wrap_load_exception(err):
+        err_msg = str(err).lower()
+        return "dlopen failed" in err_msg or "symbol not found" in err_msg
+
     if int(neuron.__version__.split(".")[0]) < 9:
+        model_path = os.path.join(
+            os.path.dirname(__file__),
+            f"tmp/{name}",
+        )
         path = os.path.join(
             os.path.dirname(__file__),
             f"tmp/{name}/{platform.machine()}/.libs/libnrnmech.so",
         )
         if os.path.exists(path):
-            h.nrn_load_dll(path)  # load all mechanisms
+            _validate_neuron_build_metadata(model_path)
+            try:
+                h.nrn_load_dll(path)  # load all mechanisms
+            except Exception as err:
+                if should_wrap_load_exception(err):
+                    raise_load_err(path, err)
+                raise
         else:
             print_err()
     else:
         print(f"Loading NEURON model '{name}'")
-        path = os.path.join(
+        model_path = os.path.join(
             os.path.dirname(__file__),
             f"tmp/{name}",
         )
-        if os.path.exists(path):
-            print(f"Found path: {path}, loading mechanisms...")
+        if os.path.exists(model_path):
+            print(f"Found path: {model_path}, loading mechanisms...")
+            _validate_neuron_build_metadata(model_path)
             if not USE_CORENEURON:
                 # only needs to be loaded if we are not running using special
-                mech_loaded_bool = neuron.load_mechanisms(path)
+                try:
+                    mech_loaded_bool = neuron.load_mechanisms(model_path)
+                except Exception as err:
+                    if should_wrap_load_exception(err):
+                        raise_load_err(model_path, err)
+                    raise
                 if not mech_loaded_bool:
-                    raise FileNotFoundError(f"Loading mechanisms from '{path}' failed.")
+                    raise FileNotFoundError(
+                        f"Loading mechanisms from '{model_path}' failed."
+                    )
             print(f"... done.")
         else:
             print_err()

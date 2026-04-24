@@ -367,6 +367,16 @@ fi
         sys.exit(1)
 
 
+def _get_neuron_build_metadata():
+    return {
+        "neuron_version": neuron.__version__,
+        "python_version": platform.python_version(),
+        "python_executable": os.path.realpath(sys.executable),
+        "platform_system": platform.system(),
+        "platform_machine": platform.machine(),
+    }
+
+
 def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None, codegen_opts=None):
 
     print(f"path of this file: {__file__}   ")
@@ -410,6 +420,10 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None, c
         wrapper_name=f"python_with_{model_name}",
         preloaded_model=model_name,
     )
+
+    metadata_path = os.path.join(path_for_neuron_compilation, "build_info.json")
+    with open(metadata_path, "w") as metadata_file:
+        json.dump(_get_neuron_build_metadata(), metadata_file, indent=2, sort_keys=True)
 
     print(
         f"\n------------------------------\n"
