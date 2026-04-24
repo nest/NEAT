@@ -29,6 +29,10 @@ from typing import Dict, List, Optional, Tuple
 
 
 from ...trees.compartmenttree import CompartmentTree, CompartmentNode
+from ...factorydefaults import DefaultPhysiology
+
+
+CFG = DefaultPhysiology()
 
 
 def _piecewise_to_masked_expr(expr):
@@ -104,12 +108,10 @@ def ion_channel_brian2_eqs(chan, chan_name):
 
     Returns
     -------
-    gating_eqs : str
-        One ODE line per state variable, e.g.
-            dm_Na_Ta/dt = (m_inf_Na_Ta(v) - m_Na_Ta) / (tau_m_Na_Ta(v)*ms) : 1
-    im_term : str
-        Contribution to Im (outward-positive), e.g.
-            gbar_Na_Ta * (h_Na_Ta * m_Na_Ta**3) * (e_Na_Ta - v)
+    channel_eqs : str
+        Channel-specific state equations and current-density definition.
+    current_var : str
+        Name of the current density variable contributed by the channel.
     param_decls : list[str]
         Brian2 parameter declaration lines for gbar and e_rev.
     """
@@ -117,6 +119,10 @@ def ion_channel_brian2_eqs(chan, chan_name):
 
     # Substitution: v [mV]  ->  v/mV  so Brian2 evaluates correctly in volts
     sp_v_scaled = sp.Symbol('v') / sp.Symbol('mV')
+    conc_subs = {
+        c_sym: sp.Symbol(f'c_{str(c_sym)}')
+        for c_sym in chan.conc
+    }
 
     gating_lines = []
 
@@ -126,8 +132,8 @@ def ion_channel_brian2_eqs(chan, chan_name):
 
         # -- varinf -------------------------------------------------------
         varinf = chan._substitute_defaults(chan.varinf[svar])
-        for c_sym, c_val in chan.conc.items():
-            varinf = varinf.subs(c_sym, c_val)
+        for c_sym, c_var in conc_subs.items():
+            varinf = varinf.subs(c_sym, c_var)
         varinf = varinf.subs(sp_v, sp_v_scaled)
         varinf_str = _sympy_to_brian2_str(varinf)
 
@@ -135,8 +141,8 @@ def ion_channel_brian2_eqs(chan, chan_name):
         # tauinf is in ms (already divided by q10 in IonChannel.__init__)
         # Brian2 ODE time unit is seconds, so we emit  (tauinf_expr) * ms
         tauinf = chan._substitute_defaults(chan.tauinf[svar])
-        for c_sym, c_val in chan.conc.items():
-            tauinf = tauinf.subs(c_sym, c_val)
+        for c_sym, c_var in conc_subs.items():
+            tauinf = tauinf.subs(c_sym, c_var)
         tauinf = tauinf.subs(sp_v, sp_v_scaled)
         tauinf_str = _sympy_to_brian2_str(tauinf)
 
@@ -152,10 +158,16 @@ def ion_channel_brian2_eqs(chan, chan_name):
     p_open = chan.p_open
     for svar in chan.ordered_statevars:
         p_open = p_open.subs(svar, sp.Symbol(f'{str(svar)}_{chan_name}'))
+    for c_sym, c_var in conc_subs.items():
+        p_open = p_open.subs(c_sym, c_var)
+    p_open = p_open.subs(sp_v, sp_v_scaled)
     p_open_str = _sympy_to_brian2_str(p_open)
 
-    # outward-positive: gbar * p_open * (v - e_rev)
-    im_term = f'gbar_{chan_name} * ({p_open_str}) * (e_{chan_name} - v)'
+    current_var = f'i_{chan_name}'
+    gating_lines.append(
+        f'{current_var} = gbar_{chan_name} * ({p_open_str}) '
+        f'* (e_{chan_name} - v) : amp/metre**2'
+    )
 
     # -- Parameter declarations -------------------------------------------
     param_decls = [
@@ -163,7 +175,7 @@ def ion_channel_brian2_eqs(chan, chan_name):
         f'e_{chan_name}    : volt',
     ]
 
-    return '\n'.join(gating_lines), im_term, param_decls
+    return '\n'.join(gating_lines), current_var, param_decls
 
 
 class Brian2CompartmentNode(CompartmentNode):
@@ -174,7 +186,7 @@ class Brian2CompartmentNode(CompartmentNode):
 
     @property
     def fake_surface(self):
-        # cylindrical section surface area (not including end caps), in um^2
+        # cylindrical section surface area (not including end caps), in cm^2
         return 2 * np.pi * self.fake_radius * self.fake_length
 
 
@@ -199,7 +211,7 @@ class Brian2CompartmentTree(CompartmentTree):
 
     def __init__(self, arg=None, channel_storage: Optional[Dict[str, "IonChannel"]] = None):
         super().__init__(arg)
-        self._channel_storage = channel_storage or {}
+        self._channel_storage = channel_storage or getattr(self, "channel_storage", {})
 
         # auxiliary constants for fake geometry calculation
         self.fake_c_m = 1.0 # [uF / cm^2]
@@ -228,10 +240,27 @@ class Brian2CompartmentTree(CompartmentTree):
         for ii, node in enumerate(self):
             node.fake_length = lengths[ii]
             node.fake_radius = radii[ii]
-        
+
         bmorph = self._build_brian_morphology()
+        self.compartment_index = {
+            node.index: int(np.atleast_1d(self.morph_map[node.index].indices[:])[0])
+            for node in self
+        }
 
         return bmorph
+
+    def get_compartment_index(self, node_or_index):
+        if hasattr(node_or_index, "index"):
+            node_index = node_or_index.index
+        else:
+            node_index = int(node_or_index)
+        return self.compartment_index[node_index]
+
+    def _set_node_state(self, bneuron, var_name, node, value, use_units=True):
+        bneuron.state(var_name, use_units=use_units)[self.get_compartment_index(node)] = value
+
+    def _set_all_state(self, bneuron, var_name, value, use_units=True):
+        bneuron.state(var_name, use_units=use_units)[:] = value
     
     def morpho_access_string(self, node, prefix=''):
         """
@@ -285,6 +314,56 @@ class Brian2CompartmentTree(CompartmentTree):
 
         return bmorph
 
+    def _concentration_ions(self):
+        ions = {ion for node in self for ion in node.concmechs}
+        for channel in self._channel_storage.values():
+            ions.update(str(ion) for ion in channel.conc)
+        return sorted(ions)
+
+    def _default_concentration(self, ion):
+        for channel in self._channel_storage.values():
+            for c_sym, c_val in channel.conc.items():
+                if str(c_sym) == ion:
+                    return c_val
+        return CFG.conc[ion]
+
+    def _initial_concentration(self, node, ion):
+        if ion in node.conc_eqs:
+            return node.conc_eqs[ion]
+        if ion in node.concmechs:
+            return node.concmechs[ion].inf
+        return self._default_concentration(ion)
+
+    def _concentration_equations(self, ion_current_terms):
+        ions = self._concentration_ions()
+        if len(ions) == 0:
+            return [], []
+
+        conc_lines = []
+        param_decls = ['A_comp : metre**2']
+
+        for ion in ions:
+            current_terms = ion_current_terms.get(ion, [])
+            if len(current_terms) > 0:
+                current_expr = ' + '.join(current_terms)
+                conc_lines.append(f'i_{ion} = A_comp * ({current_expr}) : amp')
+            else:
+                conc_lines.append(f'i_{ion} = 0 * amp : amp')
+
+            conc_lines.append(
+                f'dc_{ion}/dt = (inf_{ion} - c_{ion}) / tau_{ion} '
+                f'+ gamma_{ion} * (i_{ion} / nA) / ms : 1'
+            )
+            param_decls.extend(
+                [
+                    f'gamma_{ion} : 1',
+                    f'tau_{ion}   : second',
+                    f'inf_{ion}   : 1',
+                ]
+            )
+
+        return conc_lines, param_decls
+
     def _build_equations(self):
         """
         Assemble the full SpatialNeuron equation string.
@@ -297,22 +376,30 @@ class Brian2CompartmentTree(CompartmentTree):
         All channel-specific parameters are declared as (shared) so that
         they can be set per-compartment after construction.
         """
-        im_terms     = ['gL * (eL - v)']
+        im_terms      = ['gL * (eL - v)']
         gating_blocks = []
-        param_decls  = [
+        param_decls   = [
             'gL    : siemens/metre**2',
             'eL    : volt',
             'I_ext : amp (point current)',
         ]
+        ion_current_terms = {ion: [] for ion in self._concentration_ions()}
         
         # ion channel contributions
         for cname, channel in self._channel_storage.items():
-            gating_eqs, im_term, pdecls = ion_channel_brian2_eqs(
-                self.channel_storage[cname], cname
-            )
+            gating_eqs, current_var, pdecls = ion_channel_brian2_eqs(channel, cname)
             gating_blocks.append(gating_eqs)
-            im_terms.append(im_term)
-            param_decls.extend(pdecls)  
+            im_terms.append(current_var)
+            param_decls.extend(pdecls)
+
+            ion = getattr(channel, "ion", None)
+            if ion is not None:
+                ion = str(ion)
+                if ion in ion_current_terms:
+                    ion_current_terms[ion].append(current_var)
+
+        conc_eqs, conc_params = self._concentration_equations(ion_current_terms)
+        param_decls.extend(conc_params)
         
         # synapse contributions
         syn_odes, syn_params = self._synapse_equations()
@@ -320,17 +407,64 @@ class Brian2CompartmentTree(CompartmentTree):
 
         im_line = 'Im = ' + ' + '.join(im_terms) + ' : amp/metre**2'
 
-        return '\n'.join([im_line] + gating_blocks + syn_odes + param_decls)
+        return '\n'.join(gating_blocks + conc_eqs + syn_odes + [im_line] + param_decls)
 
     def _set_parameters(self, bneuron):
+        conc_ions = self._concentration_ions()
+        for syn_name, syn in getattr(self, '_synapses', {}).items():
+            self._set_all_state(
+                bneuron, f"e_{syn_name}", syn["e_rev_mV"] * mV, use_units=True
+            )
+
         for node in self:
             for cname, (g, e) in node.currents.items():
                 if cname == "L":
-                    exec(f"{self.morpho_access_string(node, prefix='bneuron')}.main.g{cname} = g * uS / (node.fake_surface * cm2)")
-                    exec(f"{self.morpho_access_string(node, prefix='bneuron')}.main.e{cname} = e * mV")
+                    self._set_node_state(
+                        bneuron,
+                        f"g{cname}",
+                        node,
+                        g * uS / (node.fake_surface * cm2),
+                        use_units=True,
+                    )
+                    self._set_node_state(
+                        bneuron, f"e{cname}", node, e * mV, use_units=True
+                    )
                 else:
-                    exec(f"{self.morpho_access_string(node, prefix='bneuron')}.main.gbar_{cname} = g * uS / (node.fake_surface * cm2)")
-                    exec(f"{self.morpho_access_string(node, prefix='bneuron')}.main.e_{cname} = e * mV")
+                    self._set_node_state(
+                        bneuron,
+                        f"gbar_{cname}",
+                        node,
+                        g * uS / (node.fake_surface * cm2),
+                        use_units=True,
+                    )
+                    self._set_node_state(
+                        bneuron, f"e_{cname}", node, e * mV, use_units=True
+                    )
+
+            if len(conc_ions) > 0:
+                self._set_node_state(
+                    bneuron, "A_comp", node, node.fake_surface * cm2, use_units=True
+                )
+                for ion in conc_ions:
+                    concmech = node.concmechs.get(ion)
+                    if concmech is None:
+                        gamma = 0.0
+                        tau = 1.0
+                        inf = self._initial_concentration(node, ion)
+                    else:
+                        gamma = concmech.gamma
+                        tau = concmech.tau
+                        inf = concmech.inf
+
+                    self._set_node_state(
+                        bneuron, f"gamma_{ion}", node, gamma, use_units=False
+                    )
+                    self._set_node_state(
+                        bneuron, f"tau_{ion}", node, tau * ms, use_units=True
+                    )
+                    self._set_node_state(
+                        bneuron, f"inf_{ion}", node, inf, use_units=False
+                    )
 
     def add_double_exp_synapse(
         self,
@@ -400,7 +534,7 @@ class Brian2CompartmentTree(CompartmentTree):
             'norm':         norm,         # stored for use in Synapses on_pre
         }
 
-    def _synapse_equations(self) -> Tuple[List[str], List[str], List[str]]:
+    def _synapse_equations(self) -> Tuple[List[str], List[str]]:
         """
         Generate Brian2 equation fragments for all registered synapse types.
 
@@ -408,13 +542,11 @@ class Brian2CompartmentTree(CompartmentTree):
         -------
         ode_lines : list[str]
             One pair of ODE lines per synapse (rise and decay variables).
-        im_terms : list[str]
-            One Im contribution string per synapse.
         param_decls : list[str]
             Parameter declaration lines (gbar and e_rev per synapse).
         """
         if not hasattr(self, '_synapses') or not self._synapses:
-            return [], [], []
+            return [], []
 
         ode_lines   = []
         param_decls = []
@@ -473,8 +605,30 @@ class Brian2CompartmentTree(CompartmentTree):
         )
 
     def initialise_at_veq(self, bneuron):
+        conc_ions = self._concentration_ions()
         for node in self:
-            exec(f"{self.morpho_access_string(node, prefix='bneuron')}.main.v = {node.e_eq} * mV")
+            self._set_node_state(bneuron, "v", node, node.e_eq * mV, use_units=True)
+
+            for ion in conc_ions:
+                self._set_node_state(
+                    bneuron,
+                    f"c_{ion}",
+                    node,
+                    self._initial_concentration(node, ion),
+                    use_units=False,
+                )
+
+            for cname, channel in self._channel_storage.items():
+                conc_kwargs = {
+                    str(c_sym): self._initial_concentration(node, str(c_sym))
+                    for c_sym in channel.conc
+                }
+                args = channel._args_as_list(node.e_eq, w_statevar=False, **conc_kwargs)
+                for svar in channel.ordered_statevars:
+                    val = float(np.asarray(channel.f_varinf[svar](*args)))
+                    self._set_node_state(
+                        bneuron, f"{str(svar)}_{cname}", node, val, use_units=False
+                    )
 
     def init_model(self, threshold='v > -20*mV', refractory='v > -30*mV'):
         """

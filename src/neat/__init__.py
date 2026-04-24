@@ -56,6 +56,7 @@ from .trees.compartmenttree import CompartmentNode
 
 try:
     from .simulations.neuron.neuronmodel import load_neuron_model
+    from .simulations.neuron.neuronmodel import NeuronMechanismLoadError
     from .simulations.neuron.neuronmodel import NeuronSimTree
     from .simulations.neuron.neuronmodel import NeuronSimNode
     from .simulations.neuron.neuronmodel import NeuronCompartmentTree
