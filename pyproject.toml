@@ -77,7 +77,7 @@ docs = [
     "dill>=0.3.8",
 ]
 brian2 = [
-    "brian2 >= 2.10.0",
+    "brian2 >= 2.9.0",
 ]
 
 [tool.setuptools.packages.find]
