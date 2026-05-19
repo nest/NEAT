@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        nest_branch: ["v3.8", "master"]
+        nest_branch: ["v3.8", "main"]
       fail-fast: false
     steps:
       # Checkout the repository contents
