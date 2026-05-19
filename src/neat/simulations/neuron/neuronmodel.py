@@ -1126,7 +1126,7 @@ class NeuronSimTree(PhysTree):
         np.array
             The impulse response kernel in [MOhm/ms]
         """
-        (loc0, loc1) = self.convert_loc_arg_to_locs([loc0, loc1])
+        loc0, loc1 = self.convert_loc_arg_to_locs([loc0, loc1])
         self.set_simulation_parameters(
             dt=dt, t_calibrate=t_calibrate, v_init=v_init, factor_lambda=factor_lambda
         )
