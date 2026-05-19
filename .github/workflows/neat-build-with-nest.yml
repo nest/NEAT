@@ -89,10 +89,7 @@ jobs:
       # Install NESTML
       - name: Install NESTML
         run: |
-          git clone --depth=1 https://github.com/nest/nestml --branch main
-          cd nestml/
-          pip install .
-          cd ..
+          pip install nestml
 
       # Install NEAT
       - name: Install NEAT
