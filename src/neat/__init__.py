@@ -72,8 +72,8 @@ except ModuleNotFoundError:
     warnings.warn("NEST not available", UserWarning)
 
 try:
-    from .simulations.dendrify.dendrifymodel import DendrifyCompartmentTree
-    from .simulations.dendrify.brian2model import Brian2CompartmentTree
+    from .simulations.brian2.brian2model import Brian2CompartmentTree
+    from .simulations.brian2.brian2model import Brian2CompartmentNode
 except ModuleNotFoundError:
     warnings.warn("Dendrify not available", UserWarning)
 
