@@ -456,7 +456,7 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         points, _ = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=1
+            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron1'
         )
         # create a neuron comparemtns
         comps = []
@@ -491,7 +491,7 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         points, _ = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=1
+            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron1'
         )
         # create a neuron comparemtns
         comps = []
@@ -538,7 +538,7 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         points, _ = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=1
+            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron1'
         )
         # create a neuron comparemtns
         comps = []
@@ -663,7 +663,7 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         lengths, radii = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=2
+            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron2'
         )
         # create a neuron comparemtns
         comps = []
@@ -693,7 +693,7 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         lengths, radii = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=2
+            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron2'
         )
         # create a neuron comparemtns
         comps = []
@@ -732,7 +732,7 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         lengths, radii = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=2
+            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron2'
         )
         # create a neuron comparemtns
         comps = []

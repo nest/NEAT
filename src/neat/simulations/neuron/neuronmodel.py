@@ -1506,7 +1506,7 @@ class NeuronCompartmentTree(NeuronSimTree):
     derived.
     """
 
-    def __init__(self, ctree, fake_c_m=1.0, fake_r_a=100.0 * 1e-6):
+    def __init__(self, ctree, fake_c_m=1.0, fake_r_a=100.0 * 1e-6, method=2):
 
         try:
             assert issubclass(ctree.__class__, CompartmentTree)
@@ -1521,11 +1521,11 @@ class NeuronCompartmentTree(NeuronSimTree):
             ctree,
             fake_c_m=fake_c_m,
             fake_r_a=fake_r_a,
-            method='neuron2',
+            method=method,
         )
 
     def _create_reduced_neuron_model(
-        self, ctree, fake_c_m=1.0, fake_r_a=100.0 * 1e-6, method='neuron2'
+        self, ctree, fake_c_m=1.0, fake_r_a=100.0 * 1e-6, method=2
     ):
         # calculate geometry that will lead to correct constants
         arg1, arg2 = ctree.compute_fake_geometry(
@@ -1533,9 +1533,9 @@ class NeuronCompartmentTree(NeuronSimTree):
             fake_r_a=fake_r_a,
             factor_r_a=1e-6,
             delta=1e-10,
-            method=method,
+            method=f'neuron{method}',
         )
-        if method == 'neuron1':
+        if method == 1:
             points = arg1
             surfaces = arg2
             for ii, comp_node in enumerate(ctree):
@@ -1558,7 +1558,7 @@ class NeuronCompartmentTree(NeuronSimTree):
                 sim_node.c_m = fake_c_m
                 sim_node.r_a = fake_r_a
                 sim_node.content["points_3d"] = points[comp_node.index]
-        elif method == 'neuron2':
+        elif method == 2:
             lengths = arg1
             radii = arg2
             surfaces = 2.0 * np.pi * radii * lengths

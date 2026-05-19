@@ -1924,7 +1924,7 @@ class CompartmentTree(STree):
         fake_r_a=100.0 * 1e-6,
         factor_r_a=1e-6,
         delta=1e-14,
-        method="neuron2",
+        method=2,
     ):
         """
         Computes a fake geometry so that the neuron model is a reduced
