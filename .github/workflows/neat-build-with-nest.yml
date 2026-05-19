@@ -43,7 +43,7 @@ jobs:
       - name: Setup Python 3.9
         uses: actions/setup-python@v5
         with:
-          python-version: 3.9
+          python-version: 3.12
 
       # Install dependencies
       - name: Install apt dependencies
@@ -89,10 +89,7 @@ jobs:
       # Install NESTML
       - name: Install NESTML
         run: |
-          git clone --depth=1 https://github.com/nest/nestml --branch main
-          cd nestml/
-          pip install .
-          cd ..
+          pip install nestml
 
       # Install NEAT
       - name: Install NEAT
