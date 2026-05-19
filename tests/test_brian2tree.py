@@ -139,10 +139,14 @@ class TestBrian2:
 
         res = {
             "t": t[mask] - tcal,
-            "v_m": np.array([np.array(mon.v[ii] / brian2.mV)[mask] for ii in range(len(rec_idxs))]),
+            "v_m": np.array(
+                [np.array(mon.v[ii] / brian2.mV)[mask] for ii in range(len(rec_idxs))]
+            ),
         }
         for var in record_vars:
-            res[var] = np.array([np.array(getattr(mon, var)[ii])[mask] for ii in range(len(rec_idxs))])
+            res[var] = np.array(
+                [np.array(getattr(mon, var)[ii])[mask] for ii in range(len(rec_idxs))]
+            )
 
         return res
 
@@ -163,7 +167,9 @@ class TestBrian2:
         simtree.store_locs(rec_locs, name="rec locs")
 
         for step in current_steps:
-            simtree.add_i_clamp(step["comp_idx"], step["amp"], step["delay"], step["dur"])
+            simtree.add_i_clamp(
+                step["comp_idx"], step["amp"], step["delay"], step["dur"]
+            )
 
         return simtree.run(tmax, record_from_channels=record_channels)
 
@@ -177,7 +183,9 @@ class TestBrian2:
         cfit = CompartmentFitter(self.tree, save_cache=False, recompute_cache=True)
         self.ctree, _ = cfit.fit_model([(1, 0.5)])
 
-        bsimtree = Brian2CompartmentTree(self.ctree, channel_storage=self.ctree.channel_storage)
+        bsimtree = Brian2CompartmentTree(
+            self.ctree, channel_storage=self.ctree.channel_storage
+        )
         res_brian2 = self._run_brian2_model(
             bsimtree,
             rec_idxs=[0],
@@ -215,7 +223,9 @@ class TestBrian2:
             dt=dt,
         )
         res_brian2 = self._run_brian2_model(
-            Brian2CompartmentTree(self.ctree, channel_storage=self.ctree.channel_storage),
+            Brian2CompartmentTree(
+                self.ctree, channel_storage=self.ctree.channel_storage
+            ),
             rec_idxs=[0],
             current_steps=current_steps,
             tmax=200.0,
@@ -225,10 +235,14 @@ class TestBrian2:
 
         idx = min(len(res_neuron["t"]), len(res_brian2["t"]))
         assert (
-            np.sqrt(np.mean((res_brian2["v_m"][0][:idx] - res_neuron["v_m"][0][:idx]) ** 2))
+            np.sqrt(
+                np.mean((res_brian2["v_m"][0][:idx] - res_neuron["v_m"][0][:idx]) ** 2)
+            )
             < 0.2
         )
-        assert np.allclose(res_brian2["v_m"][0][:idx], res_neuron["v_m"][0][:idx], atol=1.0)
+        assert np.allclose(
+            res_brian2["v_m"][0][:idx], res_neuron["v_m"][0][:idx], atol=1.0
+        )
 
         if pplot:
             pl.plot(res_neuron["t"][:idx], res_neuron["v_m"][0][:idx], "rx-")
@@ -276,7 +290,9 @@ class TestBrian2:
             dt=dt,
         )
         res_brian2 = self._run_brian2_model(
-            Brian2CompartmentTree(self.ctree, channel_storage=self.ctree.channel_storage),
+            Brian2CompartmentTree(
+                self.ctree, channel_storage=self.ctree.channel_storage
+            ),
             rec_idxs=[0, 1, 2],
             current_steps=current_steps,
             tmax=200.0,
@@ -287,10 +303,16 @@ class TestBrian2:
         idx = min(len(res_neuron["t"]), len(res_brian2["t"]))
         for ii in range(3):
             assert (
-                np.sqrt(np.mean((res_brian2["v_m"][ii][:idx] - res_neuron["v_m"][ii][:idx]) ** 2))
+                np.sqrt(
+                    np.mean(
+                        (res_brian2["v_m"][ii][:idx] - res_neuron["v_m"][ii][:idx]) ** 2
+                    )
+                )
                 < 0.3
             )
-            assert np.allclose(res_brian2["v_m"][ii][:idx], res_neuron["v_m"][ii][:idx], atol=1.5)
+            assert np.allclose(
+                res_brian2["v_m"][ii][:idx], res_neuron["v_m"][ii][:idx], atol=1.5
+            )
 
         if pplot:
             pl.figure(figsize=(15, 6))
@@ -347,7 +369,9 @@ class TestBrian2:
             record_channels=True,
         )
         res_brian2 = self._run_brian2_model(
-            Brian2CompartmentTree(self.ctree, channel_storage=self.ctree.channel_storage),
+            Brian2CompartmentTree(
+                self.ctree, channel_storage=self.ctree.channel_storage
+            ),
             rec_idxs=list(range(len(self.ctree))),
             current_steps=current_steps,
             tmax=tmax,
@@ -358,23 +382,51 @@ class TestBrian2:
 
         idx = min(len(res_neuron["t"]), len(res_brian2["t"]))
         for ii in range(len(self.ctree)):
-            v_maxdiff = np.max(np.abs(res_brian2["v_m"][ii][:idx] - res_neuron["v_m"][ii][:idx]))
-            v_meandiff = np.mean(np.abs(res_brian2["v_m"][ii][:idx] - res_neuron["v_m"][ii][:idx]))
+            v_maxdiff = np.max(
+                np.abs(res_brian2["v_m"][ii][:idx] - res_neuron["v_m"][ii][:idx])
+            )
+            v_meandiff = np.mean(
+                np.abs(res_brian2["v_m"][ii][:idx] - res_neuron["v_m"][ii][:idx])
+            )
             assert v_maxdiff < 3.0
             assert v_meandiff < 0.05
 
-        assert np.max(
-            np.abs(res_brian2["m_Ca_HVA"][0][:idx] - res_neuron["chan"]["Ca_HVA"]["m"][0][:idx])
-        ) < 0.05
-        assert np.max(
-            np.abs(res_brian2["h_Ca_HVA"][0][:idx] - res_neuron["chan"]["Ca_HVA"]["h"][0][:idx])
-        ) < 0.05
-        assert np.max(
-            np.abs(res_brian2["m_NaTa_t"][0][:idx] - res_neuron["chan"]["NaTa_t"]["m"][0][:idx])
-        ) < 0.05
-        assert np.max(
-            np.abs(res_brian2["h_NaTa_t"][0][:idx] - res_neuron["chan"]["NaTa_t"]["h"][0][:idx])
-        ) < 0.05
+        assert (
+            np.max(
+                np.abs(
+                    res_brian2["m_Ca_HVA"][0][:idx]
+                    - res_neuron["chan"]["Ca_HVA"]["m"][0][:idx]
+                )
+            )
+            < 0.05
+        )
+        assert (
+            np.max(
+                np.abs(
+                    res_brian2["h_Ca_HVA"][0][:idx]
+                    - res_neuron["chan"]["Ca_HVA"]["h"][0][:idx]
+                )
+            )
+            < 0.05
+        )
+        assert (
+            np.max(
+                np.abs(
+                    res_brian2["m_NaTa_t"][0][:idx]
+                    - res_neuron["chan"]["NaTa_t"]["m"][0][:idx]
+                )
+            )
+            < 0.05
+        )
+        assert (
+            np.max(
+                np.abs(
+                    res_brian2["h_NaTa_t"][0][:idx]
+                    - res_neuron["chan"]["NaTa_t"]["h"][0][:idx]
+                )
+            )
+            < 0.05
+        )
 
         if pplot:
             pl.figure("v", figsize=(15, 6))

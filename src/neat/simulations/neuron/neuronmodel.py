@@ -37,8 +37,7 @@ from ...factorydefaults import DefaultPhysiology
 
 def check_for_coreneuron():
     return (
-        "CORENEURON_PRELOADED_MODEL" in os.environ
-        or "CORENRN_PYTHONEXE" in os.environ
+        "CORENEURON_PRELOADED_MODEL" in os.environ or "CORENRN_PYTHONEXE" in os.environ
     )
 
 
@@ -162,7 +161,6 @@ def _validate_neuron_build_metadata(model_path):
             f"Recompile the mechanisms with 'neatmodels install'. "
             f"Mismatches: {'; '.join(mismatches)}"
         )
-
 
 
 def load_neuron_model(name):
@@ -1533,7 +1531,7 @@ class NeuronCompartmentTree(NeuronSimTree):
             fake_r_a=fake_r_a,
             factor_r_a=1e-6,
             delta=1e-10,
-            method=f'neuron{method}',
+            method=f"neuron{method}",
         )
         if method == 1:
             points = arg1

@@ -354,9 +354,9 @@ class TestNeuron:
         assert res["chan"]["test_channel2"]["p_open"].shape == (n_loc, n_step)
 
     @pytest.mark.skipif(
-            check_for_coreneuron(), 
-            reason="Recording timestep can not be customized when running with CoreNEURON",
-        )
+        check_for_coreneuron(),
+        reason="Recording timestep can not be customized when running with CoreNEURON",
+    )
     def test_recording_timestep(self):
         self.load_T_tree_test_channel()
         # set of locations
@@ -456,7 +456,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         points, _ = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron1'
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron1",
         )
         # create a neuron comparemtns
         comps = []
@@ -491,7 +495,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         points, _ = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron1'
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron1",
         )
         # create a neuron comparemtns
         comps = []
@@ -538,7 +546,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         points, _ = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron1'
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron1",
         )
         # create a neuron comparemtns
         comps = []
@@ -663,7 +675,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         lengths, radii = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron2'
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron2",
         )
         # create a neuron comparemtns
         comps = []
@@ -693,7 +709,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         lengths, radii = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron2'
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron2",
         )
         # create a neuron comparemtns
         comps = []
@@ -732,7 +752,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         lengths, radii = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method='neuron2'
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron2",
         )
         # create a neuron comparemtns
         comps = []
@@ -999,9 +1023,9 @@ class TestStimuli:
         return np.arange(max_lag + 1), acf / normalization
 
     @pytest.mark.skipif(
-            check_for_coreneuron(), 
-            reason="OU process appears to cause error with CoreNEURON, needs further investigation",
-        )
+        check_for_coreneuron(),
+        reason="OU process appears to cause error with CoreNEURON, needs further investigation",
+    )
     def test_ou_processes(self, pplot=False):
         # parameter setup
         dt = 0.1
@@ -1086,16 +1110,10 @@ class TestStimuli:
 
         self._create_ball()
         self.tree.init_model(t_calibrate=t_calibrate, dt=dt)
-        self.tree.add_double_exp_synapse(
-            loc=(1, 0.5),
-            tau1=.2, tau2=3., e_r=0.0
-        )
-        self.tree.add_double_exp_synapse(
-            loc=(1, 0.5),
-            tau1=.2, tau2=3., e_r=0.0
-        )
-        self.tree.set_spiketrain(0, .01, spktms1)
-        self.tree.set_spiketrain(1, .005, spktms2)
+        self.tree.add_double_exp_synapse(loc=(1, 0.5), tau1=0.2, tau2=3.0, e_r=0.0)
+        self.tree.add_double_exp_synapse(loc=(1, 0.5), tau1=0.2, tau2=3.0, e_r=0.0)
+        self.tree.set_spiketrain(0, 0.01, spktms1)
+        self.tree.set_spiketrain(1, 0.005, spktms2)
         #     syn_idx=0,
         #     spktms=spktms,
         # )
@@ -1103,11 +1121,14 @@ class TestStimuli:
         res = self.tree.run(tmax)
         self.tree.delete_model()
 
-        assert np.max(res['v_m'][0]) > res["v_m"][0, 0] + .1  # check for depolarization
+        assert (
+            np.max(res["v_m"][0]) > res["v_m"][0, 0] + 0.1
+        )  # check for depolarization
 
         if pplot:
             pl.plot(res["t"], res["v_m"][0, :])
             pl.show()
+
 
 def debug_print(pstr):
 

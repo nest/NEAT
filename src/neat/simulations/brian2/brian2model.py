@@ -27,15 +27,23 @@ import warnings
 try:
     import brian2
     from brian2.units import (
-        ms, 
+        ms,
         mV,
-        nS, uS, 
-        pA, nA, uA,
-        pF, nF, uF, 
-        um2, cm2, 
-        um, cm,
-        Mohm
+        nS,
+        uS,
+        pA,
+        nA,
+        uA,
+        pF,
+        nF,
+        uF,
+        um2,
+        cm2,
+        um,
+        cm,
+        Mohm,
     )
+
     _BRIAN2_AVAILABLE = True
 except ImportError:
     _BRIAN2_AVAILABLE = False
@@ -51,7 +59,6 @@ from typing import Dict, List, Optional, Tuple
 
 from ...trees.compartmenttree import CompartmentTree, CompartmentNode
 from ...factorydefaults import DefaultPhysiology
-
 
 CFG = DefaultPhysiology()
 
@@ -81,7 +88,7 @@ def _piecewise_to_masked_expr(expr):
         for branch_expr, branch_cond in reversed(pw.args):
             if branch_cond == True:
                 continue
-            mask = sp.Function('bint')(branch_cond)
+            mask = sp.Function("bint")(branch_cond)
             acc = mask * branch_expr + (sp.Integer(1) - mask) * acc
         return acc
 
@@ -136,20 +143,17 @@ def ion_channel_brian2_eqs(chan, chan_name):
     param_decls : list[str]
         Brian2 parameter declaration lines for gbar and e_rev.
     """
-    sp_v = chan.sp_v          # sympy Symbol('v'), NEAT voltage in mV
+    sp_v = chan.sp_v  # sympy Symbol('v'), NEAT voltage in mV
 
     # Substitution: v [mV]  ->  v/mV  so Brian2 evaluates correctly in volts
-    sp_v_scaled = sp.Symbol('v') / sp.Symbol('mV')
-    conc_subs = {
-        c_sym: sp.Symbol(f'c_{str(c_sym)}')
-        for c_sym in chan.conc
-    }
+    sp_v_scaled = sp.Symbol("v") / sp.Symbol("mV")
+    conc_subs = {c_sym: sp.Symbol(f"c_{str(c_sym)}") for c_sym in chan.conc}
 
     gating_lines = []
 
     for svar in chan.ordered_statevars:
-        svar_str  = str(svar)
-        brian_var = f'{svar_str}_{chan_name}'   # e.g. 'm_Na_Ta'
+        svar_str = str(svar)
+        brian_var = f"{svar_str}_{chan_name}"  # e.g. 'm_Na_Ta'
 
         # -- varinf -------------------------------------------------------
         varinf = chan._substitute_defaults(chan.varinf[svar])
@@ -169,8 +173,8 @@ def ion_channel_brian2_eqs(chan, chan_name):
 
         # -- ODE ----------------------------------------------------------
         gating_lines.append(
-            f'd{brian_var}/dt = ({varinf_str} - {brian_var}) '
-            f'/ (({tauinf_str}) * ms) : 1'
+            f"d{brian_var}/dt = ({varinf_str} - {brian_var}) "
+            f"/ (({tauinf_str}) * ms) : 1"
         )
 
     # -- Im contribution --------------------------------------------------
@@ -178,25 +182,25 @@ def ion_channel_brian2_eqs(chan, chan_name):
     # suffixed Brian2 name, e.g. m -> m_Na_Ta, h -> h_Na_Ta
     p_open = chan.p_open
     for svar in chan.ordered_statevars:
-        p_open = p_open.subs(svar, sp.Symbol(f'{str(svar)}_{chan_name}'))
+        p_open = p_open.subs(svar, sp.Symbol(f"{str(svar)}_{chan_name}"))
     for c_sym, c_var in conc_subs.items():
         p_open = p_open.subs(c_sym, c_var)
     p_open = p_open.subs(sp_v, sp_v_scaled)
     p_open_str = _sympy_to_brian2_str(p_open)
 
-    current_var = f'i_{chan_name}'
+    current_var = f"i_{chan_name}"
     gating_lines.append(
-        f'{current_var} = gbar_{chan_name} * ({p_open_str}) '
-        f'* (e_{chan_name} - v) : amp/metre**2'
+        f"{current_var} = gbar_{chan_name} * ({p_open_str}) "
+        f"* (e_{chan_name} - v) : amp/metre**2"
     )
 
     # -- Parameter declarations -------------------------------------------
     param_decls = [
-        f'gbar_{chan_name} : siemens/metre**2',
-        f'e_{chan_name}    : volt',
+        f"gbar_{chan_name} : siemens/metre**2",
+        f"e_{chan_name}    : volt",
     ]
 
-    return '\n'.join(gating_lines), current_var, param_decls
+    return "\n".join(gating_lines), current_var, param_decls
 
 
 class Brian2CompartmentNode(CompartmentNode):
@@ -230,13 +234,15 @@ class Brian2CompartmentTree(CompartmentTree):
         exactly at d = 2*r_fake, minimising per-section diameter corrections.
     """
 
-    def __init__(self, arg=None, channel_storage: Optional[Dict[str, "IonChannel"]] = None):
+    def __init__(
+        self, arg=None, channel_storage: Optional[Dict[str, "IonChannel"]] = None
+    ):
         super().__init__(arg)
         self._channel_storage = channel_storage or getattr(self, "channel_storage", {})
 
         # auxiliary constants for fake geometry calculation
-        self.fake_c_m = 1.0 # [uF / cm^2]
-        self.fake_r_a = 100.0 * 1e-6 # [MOhm * cm]
+        self.fake_c_m = 1.0  # [uF / cm^2]
+        self.fake_r_a = 100.0 * 1e-6  # [MOhm * cm]
 
     def create_corresponding_node(self, index, **kwargs):
         """
@@ -255,7 +261,7 @@ class Brian2CompartmentTree(CompartmentTree):
         lengths, radii = self.compute_fake_geometry(
             fake_c_m=self.fake_c_m,
             fake_r_a=self.fake_r_a,
-            method='brian2',
+            method="brian2",
         )
 
         for ii, node in enumerate(self):
@@ -278,14 +284,16 @@ class Brian2CompartmentTree(CompartmentTree):
         return self.compartment_index[node_index]
 
     def _set_node_state(self, bneuron, var_name, node, value, use_units=True):
-        bneuron.state(var_name, use_units=use_units)[self.get_compartment_index(node)] = value
+        bneuron.state(var_name, use_units=use_units)[
+            self.get_compartment_index(node)
+        ] = value
 
     def _set_all_state(self, bneuron, var_name, value, use_units=True):
         bneuron.state(var_name, use_units=use_units)[:] = value
-    
-    def morpho_access_string(self, node, prefix=''):
+
+    def morpho_access_string(self, node, prefix=""):
         """
-        Return the string to access the corresponding node's 
+        Return the string to access the corresponding node's
         parameters in the Brian2 model.
 
         Parameters
@@ -302,22 +310,20 @@ class Brian2CompartmentTree(CompartmentTree):
             A string that can be used to access the node's parameters in the
             Brian2 model, e.g. 'bneuron.c3.c5' for a node with path [root, c3, c5].
         """
-        path = self.path_to_root(node)[::-1] # from root to node
+        path = self.path_to_root(node)[::-1]  # from root to node
         access_str = prefix
-        for n in path[1:]: # skip root
-            access_str += f'.c{n.index}'
+        for n in path[1:]:  # skip root
+            access_str += f".c{n.index}"
         return access_str
 
     def _build_brian_morphology(self, node=None, bmorph=None):
         if node is None:
-            node   = self.root
+            node = self.root
             bmorph = brian2.Cylinder(
-                diameter=2.0 * node.fake_radius * cm,
-                length=node.fake_length * cm,
-                n=1
+                diameter=2.0 * node.fake_radius * cm, length=node.fake_length * cm, n=1
             )
             self.morph_map = {node.index: bmorph}
-        
+
         for cnode in node.child_nodes:
             section = brian2.Cylinder(
                 diameter=2.0 * cnode.fake_radius * cm,
@@ -326,10 +332,10 @@ class Brian2CompartmentTree(CompartmentTree):
             )
             # Direct attribute assignment on the parent object — this is what
             # actually wires the section into the morphology tree
-            setattr(self.morph_map[node.index], f'c{cnode.index}', section)
+            setattr(self.morph_map[node.index], f"c{cnode.index}", section)
             # Read back from parent after registration (not the pre-assignment object)
             self.morph_map[cnode.index] = getattr(
-                self.morph_map[node.index], f'c{cnode.index}'
+                self.morph_map[node.index], f"c{cnode.index}"
             )
             self._build_brian_morphology(node=cnode, bmorph=bmorph)
 
@@ -361,25 +367,25 @@ class Brian2CompartmentTree(CompartmentTree):
             return [], []
 
         conc_lines = []
-        param_decls = ['A_comp : metre**2']
+        param_decls = ["A_comp : metre**2"]
 
         for ion in ions:
             current_terms = ion_current_terms.get(ion, [])
             if len(current_terms) > 0:
-                current_expr = ' + '.join(current_terms)
-                conc_lines.append(f'i_{ion} = A_comp * ({current_expr}) : amp')
+                current_expr = " + ".join(current_terms)
+                conc_lines.append(f"i_{ion} = A_comp * ({current_expr}) : amp")
             else:
-                conc_lines.append(f'i_{ion} = 0 * amp : amp')
+                conc_lines.append(f"i_{ion} = 0 * amp : amp")
 
             conc_lines.append(
-                f'dc_{ion}/dt = (inf_{ion} - c_{ion}) / tau_{ion} '
-                f'+ gamma_{ion} * (i_{ion} / nA) / ms : 1'
+                f"dc_{ion}/dt = (inf_{ion} - c_{ion}) / tau_{ion} "
+                f"+ gamma_{ion} * (i_{ion} / nA) / ms : 1"
             )
             param_decls.extend(
                 [
-                    f'gamma_{ion} : 1',
-                    f'tau_{ion}   : second',
-                    f'inf_{ion}   : 1',
+                    f"gamma_{ion} : 1",
+                    f"tau_{ion}   : second",
+                    f"inf_{ion}   : 1",
                 ]
             )
 
@@ -397,15 +403,15 @@ class Brian2CompartmentTree(CompartmentTree):
         All channel-specific parameters are declared as (shared) so that
         they can be set per-compartment after construction.
         """
-        im_terms      = ['gL * (eL - v)']
+        im_terms = ["gL * (eL - v)"]
         gating_blocks = []
-        param_decls   = [
-            'gL    : siemens/metre**2',
-            'eL    : volt',
-            'I_ext : amp (point current)',
+        param_decls = [
+            "gL    : siemens/metre**2",
+            "eL    : volt",
+            "I_ext : amp (point current)",
         ]
         ion_current_terms = {ion: [] for ion in self._concentration_ions()}
-        
+
         # ion channel contributions
         for cname, channel in self._channel_storage.items():
             gating_eqs, current_var, pdecls = ion_channel_brian2_eqs(channel, cname)
@@ -421,18 +427,18 @@ class Brian2CompartmentTree(CompartmentTree):
 
         conc_eqs, conc_params = self._concentration_equations(ion_current_terms)
         param_decls.extend(conc_params)
-        
+
         # synapse contributions
         syn_odes, syn_params = self._synapse_equations()
         param_decls.extend(syn_params)
 
-        im_line = 'Im = ' + ' + '.join(im_terms) + ' : amp/metre**2'
+        im_line = "Im = " + " + ".join(im_terms) + " : amp/metre**2"
 
-        return '\n'.join(gating_blocks + conc_eqs + syn_odes + [im_line] + param_decls)
+        return "\n".join(gating_blocks + conc_eqs + syn_odes + [im_line] + param_decls)
 
     def _set_parameters(self, bneuron):
         conc_ions = self._concentration_ions()
-        for syn_name, syn in getattr(self, '_synapses', {}).items():
+        for syn_name, syn in getattr(self, "_synapses", {}).items():
             self._set_all_state(
                 bneuron, f"e_{syn_name}", syn["e_rev_mV"] * mV, use_units=True
             )
@@ -536,23 +542,22 @@ class Brian2CompartmentTree(CompartmentTree):
                 f"tau_decay ({tau_decay_ms} ms) must be greater than "
                 f"tau_rise ({tau_rise_ms} ms) for synapse '{syn_name}'."
             )
-        if not hasattr(self, '_synapses'):
+        if not hasattr(self, "_synapses"):
             self._synapses: Dict[str, dict] = {}
         if syn_name in self._synapses:
             raise ValueError(f"Synapse '{syn_name}' already registered.")
 
         # Peak normalisation factor
-        t_peak = (
-            np.log(tau_decay_ms / tau_rise_ms)
-            / (1.0 / tau_rise_ms - 1.0 / tau_decay_ms)
+        t_peak = np.log(tau_decay_ms / tau_rise_ms) / (
+            1.0 / tau_rise_ms - 1.0 / tau_decay_ms
         )
-        norm = 1. / (np.exp(-t_peak / tau_decay_ms) - np.exp(-t_peak / tau_rise_ms))
+        norm = 1.0 / (np.exp(-t_peak / tau_decay_ms) - np.exp(-t_peak / tau_rise_ms))
 
         self._synapses[syn_name] = {
-            'tau_rise_ms':  tau_rise_ms,
-            'tau_decay_ms': tau_decay_ms,
-            'e_rev_mV':     e_rev_mV,
-            'norm':         norm,         # stored for use in Synapses on_pre
+            "tau_rise_ms": tau_rise_ms,
+            "tau_decay_ms": tau_decay_ms,
+            "e_rev_mV": e_rev_mV,
+            "norm": norm,  # stored for use in Synapses on_pre
         }
 
     def _synapse_equations(self) -> Tuple[List[str], List[str]]:
@@ -566,37 +571,36 @@ class Brian2CompartmentTree(CompartmentTree):
         param_decls : list[str]
             Parameter declaration lines (gbar and e_rev per synapse).
         """
-        if not hasattr(self, '_synapses') or not self._synapses:
+        if not hasattr(self, "_synapses") or not self._synapses:
             return [], []
 
-        ode_lines   = []
+        ode_lines = []
         param_decls = []
 
         for syn_name, syn in self._synapses.items():
-            tau_r = syn['tau_rise_ms']
-            tau_d = syn['tau_decay_ms'] 
-            e_rev = syn['e_rev_mV'] * 1e-3   # mV -> V, baked into declaration
+            tau_r = syn["tau_rise_ms"]
+            tau_d = syn["tau_decay_ms"]
+            e_rev = syn["e_rev_mV"] * 1e-3  # mV -> V, baked into declaration
 
             # State variables: (summed) so multiple Synapses objects targeting
             # the same compartment accumulate correctly
             ode_lines += [
-                f'ds_rise_{syn_name}/dt  = -s_rise_{syn_name} / ({tau_r} * ms) : siemens ',
-                f'ds_decay_{syn_name}/dt = -s_decay_{syn_name}  / ({tau_d} * ms) : siemens  ',
+                f"ds_rise_{syn_name}/dt  = -s_rise_{syn_name} / ({tau_r} * ms) : siemens ",
+                f"ds_decay_{syn_name}/dt = -s_decay_{syn_name}  / ({tau_d} * ms) : siemens  ",
             ]
 
             # Point current: inward-positive convention (e - v)
             ode_lines.append(
-                f'I_syn_{syn_name} = (s_decay_{syn_name} - s_rise_{syn_name}) * (e_{syn_name} - v) : amp (point current)'
+                f"I_syn_{syn_name} = (s_decay_{syn_name} - s_rise_{syn_name}) * (e_{syn_name} - v) : amp (point current)"
             )
 
             # gbar varies per compartment (different synaptic weight densities);
             # e_rev is fixed per synapse type so we bake it in as a constant
             param_decls += [
-                f'e_{syn_name}    : volt (shared)',
+                f"e_{syn_name}    : volt (shared)",
             ]
 
         return ode_lines, param_decls
-
 
     def get_on_pre(self, syn_name: str) -> str:
         """
@@ -618,11 +622,11 @@ class Brian2CompartmentTree(CompartmentTree):
             on_pre string to pass to brian2.Synapses, e.g.
             's_rise_AMPA_post += 0.9987 * w_var; s_decay_AMPA_post += 0.9987 * w_var'
         """
-        syn  = self._synapses[syn_name]
-        norm = syn['norm']
+        syn = self._synapses[syn_name]
+        norm = syn["norm"]
         return (
-            f's_rise_{syn_name}_post  += {norm:.10f} * w_var; '
-            f's_decay_{syn_name}_post += {norm:.10f} * w_var'
+            f"s_rise_{syn_name}_post  += {norm:.10f} * w_var; "
+            f"s_decay_{syn_name}_post += {norm:.10f} * w_var"
         )
 
     def initialise_at_veq(self, bneuron):
@@ -651,7 +655,7 @@ class Brian2CompartmentTree(CompartmentTree):
                         bneuron, f"{str(svar)}_{cname}", node, val, use_units=False
                     )
 
-    def init_model(self, threshold='v > -20*mV', refractory='v > -30*mV'):
+    def init_model(self, threshold="v > -20*mV", refractory="v > -30*mV"):
         """
         Build and return a Brian2 SpatialNeuron with Hines implicit solver.
 
@@ -667,17 +671,17 @@ class Brian2CompartmentTree(CompartmentTree):
         neuron : brian2.SpatialNeuron
         """
         bmorph = self._build_morphology()
-        eqs    = self._build_equations()
-        
+        eqs = self._build_equations()
+
         neuron = brian2.SpatialNeuron(
-            morphology         = bmorph,
-            model              = eqs,
-            Cm                 = self.fake_c_m * uF / cm2,
-            Ri                 = self.fake_r_a * Mohm * cm,  # ohm*m -> ohm*cm
-            threshold          = threshold,
-            threshold_location = 0,
-            refractory         = refractory,
-            method ='exponential_euler',
+            morphology=bmorph,
+            model=eqs,
+            Cm=self.fake_c_m * uF / cm2,
+            Ri=self.fake_r_a * Mohm * cm,  # ohm*m -> ohm*cm
+            threshold=threshold,
+            threshold_location=0,
+            refractory=refractory,
+            method="exponential_euler",
         )
 
         self._set_parameters(neuron)

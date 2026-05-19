@@ -2003,17 +2003,19 @@ class CompartmentTree(STree):
             radii = np.cbrt(fake_r_a * surfaces / (4.0 * np.pi**2 * sol))
             lengths = surfaces / (2.0 * np.pi * radii)
 
-            #---- test
-            g_a = np.pi * radii**2 / (fake_r_a * lengths/2)
-            g_b = np.pi * radii**2 / (fake_r_a * lengths/2)
+            # ---- test
+            g_a = np.pi * radii**2 / (fake_r_a * lengths / 2)
+            g_b = np.pi * radii**2 / (fake_r_a * lengths / 2)
             g_c = 1 / (1 / g_a[1:] + 1 / g_b[:-1])
-            g_c_ = 1. / vec_coupling
+            g_c_ = 1.0 / vec_coupling
             # -----
             # radii = np.cbrt(fake_r_a * surfaces / (vec_coupling * (2.0 * np.pi) ** 2))
-            # lengths = surfaces / (4.0 * np.pi * radii) 
+            # lengths = surfaces / (4.0 * np.pi * radii)
             return lengths, radii
         else:
-            raise ValueError(f"Invalid `method` argument (provided `{method}`), choose from 'neuron1', 'neuron2' or 'brian2'")
+            raise ValueError(
+                f"Invalid `method` argument (provided `{method}`), choose from 'neuron1', 'neuron2' or 'brian2'"
+            )
 
     def plot_dendrogram(
         self,

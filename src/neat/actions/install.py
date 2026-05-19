@@ -377,7 +377,9 @@ def _get_neuron_build_metadata():
     }
 
 
-def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None, codegen_opts=None):
+def _compile_neuron(
+    model_name, path_neat, channels, path_neuronresource=None, codegen_opts=None
+):
 
     print(f"path of this file: {__file__}   ")
 
@@ -435,7 +437,14 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None, c
     )
 
 
-def _compile_nest(model_name, path_neat, channels, path_nestresource=None, ions=["ca"], codegen_opts=None):
+def _compile_nest(
+    model_name,
+    path_neat,
+    channels,
+    path_nestresource=None,
+    ions=["ca"],
+    codegen_opts=None,
+):
     from pynestml.frontend.pynestml_frontend import generate_nest_compartmental_target
 
     print("!!! codegen_opts in _compile_nest:", codegen_opts)
@@ -539,12 +548,17 @@ def _install_models(
 
     if "neuron" in simulators:
         _compile_neuron(
-            model_name, path_neat, channels, 
+            model_name,
+            path_neat,
+            channels,
             path_neuronresource=path_neuronresource,
             codegen_opts=codegen_opts,
         )
     if "nest" in simulators:
         _compile_nest(
-            model_name, path_neat, channels, path_nestresource=path_nestresource,
+            model_name,
+            path_neat,
+            channels,
+            path_nestresource=path_nestresource,
             codegen_opts=codegen_opts,
         )
