@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        nest_branch: ["v3.8", "master"]
+        nest_branch: ["v3.8", "main"]
       fail-fast: false
     steps:
       # Checkout the repository contents
@@ -89,7 +89,7 @@ jobs:
       # Install NESTML
       - name: Install NESTML
         run: |
-          git clone --depth=1 https://github.com/nest/nestml --branch master
+          git clone --depth=1 https://github.com/nest/nestml --branch main
           cd nestml/
           pip install .
           cd ..
