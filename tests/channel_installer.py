@@ -28,7 +28,7 @@ except ImportError as e:
 import os
 import subprocess
 
-from neat import load_neuron_model, load_nest_model
+from neat import load_neuron_model, load_nest_model, NeuronMechanismLoadError
 
 
 def load_or_install_neuron_test_channels():
@@ -38,13 +38,15 @@ def load_or_install_neuron_test_channels():
     channel_file = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "channelcollection_for_tests.py")
     )
+    print("check running load_or_install_neuron_test_channels")
     try:
         # load_neuron_model() calls will raise a RuntimeError is a compiled model
         # is loaded multiple times
         try:
             # raises FileNotFoundError if not compiled
             load_neuron_model("multichannel_test")
-        except FileNotFoundError:
+            print("loaded multichannel_test neuron model")
+        except (FileNotFoundError, OSError, NeuronMechanismLoadError):
             subprocess.call(
                 [
                     "neatmodels",
@@ -58,8 +60,11 @@ def load_or_install_neuron_test_channels():
             )
             load_neuron_model("multichannel_test")
     except RuntimeError as e:
-        # the neuron model "multichannel_test" has already been loaded
-        pass
+        # h.nrn_load_dll raises RuntimeError when a mechanism library is loaded twice
+        if "already loaded" in str(e).lower():
+            pass
+        else:
+            raise
 
 
 def load_or_install_nest_test_channels():

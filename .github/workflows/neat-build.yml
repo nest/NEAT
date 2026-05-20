@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [ '3.9', '3.10', '3.12' ]
+        python-version: [ '3.10', '3.12', '3.13', '3.14' ]
         
       fail-fast: false
 
@@ -83,3 +83,82 @@ jobs:
       - name: Run tests
         run: |
           pytest -s -o norecursedirs='*' -o log_cli=true -o log_cli_level="DEBUG" tests
+
+  
+  build_and_test_legacy_neuron:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ '3.10' ]
+        
+      fail-fast: false
+
+    steps:
+      # Checkout the repository contents
+      - name: Checkout NEAT code
+        uses: actions/checkout@v4
+
+      # Setup Python version
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Install NEAT
+      - name: Install NEAT
+        run: |
+          pip install setuptools
+          pip install neuron==8.2.4
+          pip install .
+
+      # Unit tests
+      - name: Run tests
+        run: |
+          pytest -s -o norecursedirs='*' -o log_cli=true -o log_cli_level="DEBUG" tests
+
+  build_and_test_corenrn:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python-version: [ '3.13' ]
+        
+      fail-fast: false
+
+    steps:
+      # Checkout the repository contents
+      - name: Checkout NEAT code
+        uses: actions/checkout@v4
+
+      # Setup Python version
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Mirror NEURON's Linux wheel-test environment more closely.
+      - name: Install test dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y mpich openmpi-bin libopenmpi-dev libmpich-dev ninja-build
+
+      - name: Apply workaround for MPICH on Ubuntu 24.04
+        run: |
+          # NEURON's own wheel CI applies this workaround because the runner's
+          # default MPICH on Ubuntu 24.04 is known to be problematic.
+          sudo apt install -y mpich
+          wget 'https://launchpad.net/ubuntu/+source/mpich/4.2.0-5.1/+build/28285882/+files/mpich_4.2.0-5.1_amd64.deb'
+          wget 'https://launchpad.net/ubuntu/+source/mpich/4.2.0-5.1/+build/28285882/+files/libmpich12_4.2.0-5.1_amd64.deb'
+          sudo dpkg --install mpich_4.2.0-5.1_amd64.deb libmpich12_4.2.0-5.1_amd64.deb
+
+      # Install NEAT
+      - name: Install NEAT
+        run: |
+          pip install setuptools
+          pip install .
+
+      # Unit tests
+      - name: Run tests
+        run: |
+          cd tests/
+          sh pytest_corenrn_runner.sh
+

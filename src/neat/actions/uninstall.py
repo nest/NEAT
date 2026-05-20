@@ -20,7 +20,10 @@
 # along with NEST.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
+import pathlib
 import shutil
+
+from .install import get_local_bin_dir
 
 
 def _check_model_name(model_name):
@@ -34,6 +37,19 @@ def _check_model_name(model_name):
             "Model name [name] is a path name (contains '/') or "
             "a file name (contains '.', which is not allowed."
         )
+
+
+def remove_nrnspecial_wrapper(model_name):
+    wrapper_name = pathlib.Path(f"python_with_{model_name}")
+
+    local_bin_dir = get_local_bin_dir()
+    wrapper_path = local_bin_dir / wrapper_name
+
+    try:
+        os.remove(wrapper_path)
+        print(f"> Uninstalled {wrapper_name} from {local_bin_dir}")
+    except FileNotFoundError as e:
+        print(f"> {wrapper_name} not found in {local_bin_dir}, nothing to uninstall.")
 
 
 def _uninstall_models(
@@ -67,6 +83,7 @@ def _uninstall_models(
                 print(f"> {model_name} not found in nest, nothing to uninstall.")
 
         if "neuron" in simulators:
+            remove_nrnspecial_wrapper(model_name)
             try:
                 path_neuron = os.path.join(
                     path_neat, "simulations/", f"neuron/tmp/{model_name}/"
