@@ -139,12 +139,7 @@ def test_load_neuron_model_skips_duplicate_legacy_loads(monkeypatch):
 
     model_name = f"test_model_{uuid.uuid4().hex}"
     model_path = Path(neuronmodel.__file__).resolve().parent / "tmp" / model_name
-    lib_path = (
-        model_path
-        / neuronmodel.platform.machine()
-        / ".libs"
-        / "libnrnmech.so"
-    )
+    lib_path = model_path / neuronmodel.platform.machine() / ".libs" / "libnrnmech.so"
     lib_path.parent.mkdir(parents=True)
     lib_path.touch()
 

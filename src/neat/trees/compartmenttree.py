@@ -824,7 +824,7 @@ class CompartmentTree(STree):
             for cnode in node.child_nodes:
                 fun_vals[ii] += cnode.g_c * (node.e_eq - cnode.e_eq)
         return fun_vals
-    
+
     def _jac_e_leak_fit(self, e_l):
         for ii, node in enumerate(self):
             node.currents["L"][1] = e_l[ii]
