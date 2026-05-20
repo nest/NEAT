@@ -30,7 +30,6 @@ from neat import GreensTree, NeuronSimTree, SOVTree
 
 from neat.channels.channelcollection import channelcollection
 
-
 MORPHOLOGIES_PATH_PREFIX = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "test_morphologies")
 )

@@ -786,10 +786,8 @@ class STree(object):
             else:
                 subtree_nodes = [ref_node]  # both input nodes are the same
         else:
-            raise ValueError(
-                "|subtree_root| not in path from |ref_node| \
-                                root"
-            )
+            raise ValueError("|subtree_root| not in path from |ref_node| \
+                                root")
         return subtree_nodes
 
     def sister_leafs(self, node):

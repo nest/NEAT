@@ -36,7 +36,6 @@ import os
 import sys
 import re
 
-
 EXIT_SUCCESS = 0
 EXIT_BAD_HEADER = 1
 

@@ -581,10 +581,8 @@ class SOVTree(PhysTree):
                     / np.abs(alpha)
                 )
         else:
-            raise ValueError(
-                "`importance_type` argument can be 'simple' or \
-                              'full'"
-            )
+            raise ValueError("`importance_type` argument can be 'simple' or \
+                              'full'")
 
         return absolute_importance / np.max(absolute_importance)
 
@@ -654,10 +652,8 @@ class SOVTree(PhysTree):
         elif sort_type == "importance":
             inds_sort = np.argsort(importance)[::-1]
         else:
-            raise ValueError(
-                "`sort_type` argument can be 'timescale' or \
-                              'importance'"
-            )
+            raise ValueError("`sort_type` argument can be 'timescale' or \
+                              'importance'")
         if return_importance:
             return alphas[inds_sort], gammas[inds_sort, :], importance[inds_sort]
         else:

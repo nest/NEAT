@@ -815,7 +815,7 @@ class IonChannel(object):
 
         taustring = "tau_" + ", tau_".join(sv)
         varstring = "_inf, ".join(sv) + "_inf"
-        file.write("    GLOBAL %s, %s\n" % (varstring, taustring))
+        file.write("    RANGE %s, %s\n" % (varstring, taustring))
         file.write("    THREADSAFE" + "\n")
         file.write("}\n\n")
 

@@ -32,6 +32,7 @@ import itertools
 from neat import GreensTree
 from neat import CompartmentNode, CompartmentTree
 from neat import NeuronSimTree, NeuronCompartmentTree
+from neat import check_for_coreneuron
 import neat.tools.kernelextraction as ke
 
 import channelcollection_for_tests as channelcollection
@@ -42,6 +43,10 @@ channel_installer.load_or_install_neuron_test_channels()
 
 MORPHOLOGIES_PATH_PREFIX = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "test_morphologies")
+)
+SKIP_ACTIVE_MECHS_WITH_CORENEURON = pytest.mark.skipif(
+    check_for_coreneuron(),
+    reason="Active mechanism tests are skipped when running with CoreNEURON",
 )
 colours = [
     "DeepPink",
@@ -222,6 +227,7 @@ class TestNeuron:
                     jj += 1
             pl.show()
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_active(self, pplot=False):
         self.load_T_tree_active()
         # set of locations
@@ -279,6 +285,7 @@ class TestNeuron:
                     jj += 1
             pl.show()
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_channel_recording(self):
         self.load_T_tree_test_channel()
         # set of locations
@@ -288,6 +295,8 @@ class TestNeuron:
         self.neurontree.store_locs(locs, name="rec locs")
         # run test simulation
         res = self.neurontree.run(1.0, record_from_channels=True)
+        self.neurontree.delete_model()
+
         # check if results are stored correctly
         assert set(res["chan"]["test_channel2"].keys()) == {
             "a00",
@@ -319,6 +328,7 @@ class TestNeuron:
         self.neurontree.store_locs(locs, name="rec locs")
         # run test simulation
         res = self.neurontree.run(10.0, record_from_channels=True)
+        self.neurontree.delete_model()
         # check if results are stored correctly
         assert set(res["chan"]["test_channel2"].keys()) == {
             "a00",
@@ -349,6 +359,10 @@ class TestNeuron:
         assert res["chan"]["test_channel2"]["a11"].shape == (n_loc, n_step)
         assert res["chan"]["test_channel2"]["p_open"].shape == (n_loc, n_step)
 
+    @pytest.mark.skipif(
+        check_for_coreneuron(),
+        reason="Recording timestep can not be customized when running with CoreNEURON",
+    )
     def test_recording_timestep(self):
         self.load_T_tree_test_channel()
         # set of locations
@@ -448,7 +462,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         points, _ = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=1
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron1",
         )
         # create a neuron comparemtns
         comps = []
@@ -483,7 +501,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         points, _ = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=1
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron1",
         )
         # create a neuron comparemtns
         comps = []
@@ -530,7 +552,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         points, _ = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=1
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron1",
         )
         # create a neuron comparemtns
         comps = []
@@ -655,7 +681,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         lengths, radii = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=2
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron2",
         )
         # create a neuron comparemtns
         comps = []
@@ -685,7 +715,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         lengths, radii = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=2
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron2",
         )
         # create a neuron comparemtns
         comps = []
@@ -724,7 +758,11 @@ class TestReducedNeuron:
         ctree = self.ctree
         # check if fake geometry is correct
         lengths, radii = ctree.compute_fake_geometry(
-            fake_c_m=fake_c_m, fake_r_a=fake_r_a, factor_r_a=1e-6, delta=1e-14, method=2
+            fake_c_m=fake_c_m,
+            fake_r_a=fake_r_a,
+            factor_r_a=1e-6,
+            delta=1e-14,
+            method="neuron2",
         )
         # create a neuron comparemtns
         comps = []
@@ -835,15 +873,300 @@ class TestReducedNeuron:
         assert np.allclose(z_mat_sim, z_mat_comp)
 
 
-if __name__ == "__main__":
-    tn = TestNeuron()
-    tn.test_passive(pplot=True)
-    tn.test_active(pplot=True)
-    tn.test_channel_recording()
-    tn.test_recording_timestep()
+class TestStimuli:
+    def _create_ball(self):
+        """
+        Load the T-tree morphology in memory with passive conductance
 
-    trn = TestReducedNeuron()
-    trn.test_geometry1()
-    trn.test_impedance_properties_1()
-    trn.test_geometry2()
-    trn.test_impedance_properties_2()
+          6--5--4--7--8
+                |
+                |
+                1
+        """
+        self.v_eq = -75.0
+        # load the morphology
+        fname = os.path.join(MORPHOLOGIES_PATH_PREFIX, "ball.swc")
+        self.tree = NeuronSimTree(fname, types=[1, 3, 4])
+        self.tree.fit_leak_current(self.v_eq, 10.0)
+        self.tree.set_comp_tree()
+
+    def test_i_clamp(self, pplot=False):
+        # parameter setup
+        dt = 0.1
+        tmax = 1000.0
+        t_calibrate = 50.0
+        amp = 0.01
+
+        self._create_ball()
+        self.tree.init_model(t_calibrate=t_calibrate, dt=dt)
+        # add step current clamp
+        self.tree.add_i_clamp(
+            loc=(1, 0.5),
+            delay=3 * tmax / 10,
+            dur=4 * tmax / 10.0,
+            amp=0.01,
+        )
+
+        res = self.tree.run(tmax, record_from_iclamps=True)
+        print(res["v_m"])
+        self.tree.delete_model()
+
+        if pplot:
+            import matplotlib.pyplot as plt
+
+            plt.figure()
+            plt.plot(res["t"], res["i_clamp"][0, :], label="I Clamp")
+            plt.plot(res["t"], res["v_m"][0, :], label="V Membrane")
+            plt.xlabel("Time [ms]")
+            plt.legend()
+            plt.show()
+
+    def _voltage_statistics(self, delta_t, mu_ou, sigma_ou, tau_ou):
+        """
+        Stationary autocovariance C_v(Δ).
+
+        Parameters
+        ----------
+        delta_t : array_like
+            Time lag(s) Δ
+        sigma_ou : float
+            OU standard deviation parameter [nA]
+        tau_ou : float
+            OU timescale [ms]
+        mu_ou : float
+            OU mean [nA]
+        """
+        mu_ou *= 1e-3  # nA to uA
+        sigma_ou *= 1e-3  # nA to uA
+
+        soma = self.tree[1]
+        tau = soma.c_m / soma.currents["L"][0] * 1e3  # s to ms
+        e_l = soma.currents["L"][1]
+        ca = soma.c_m * 4 * np.pi * soma.R**2 * 1e-8  # um^2 to cm^2
+
+        # voltage mean
+        mean = e_l + tau * mu_ou / ca  # ms * V / s = mV
+
+        delta_t = np.abs(np.asarray(delta_t))
+
+        prefactor = sigma_ou**2 / ca**2  # (uA / uF)^2 = (V / s)^2
+        scale = (tau**2 * tau_ou) / (tau_ou**2 - tau**2)
+
+        # autocovarianvce
+        autocov = (
+            prefactor
+            * scale
+            * (tau_ou * np.exp(-delta_t / tau_ou) - tau * np.exp(-delta_t / tau))
+        )  # (V / s)^2 * ms^2 = mV^2
+
+        return mean, autocov
+
+    def _autocovariance(self, x, max_lag=None):
+        """
+        Empirical autocovariance of a 1D time series.
+
+        Parameters
+        ----------
+        x : array_like
+            Time series data (1D).
+        max_lag : int or None
+            Maximum lag (in samples). If None, uses N-1.
+
+        Returns
+        -------
+        lags : ndarray
+            Array of integer lags.
+        cov : ndarray
+            Autocovariance at each lag.
+        """
+        x = np.asarray(x)
+        x = x - np.mean(x)
+
+        N = x.size
+        if max_lag is None:
+            max_lag = N - 1
+
+        cov = np.empty(max_lag + 1)
+        for k in range(max_lag + 1):
+            cov[k] = np.dot(x[: N - k], x[k:]) / (N - k)
+
+        lags = np.arange(max_lag + 1)
+        return lags, cov
+
+    def _autocovariance_fft(self, x, max_lag=None):
+        """
+        Empirical autocovariance using FFT.
+
+        Parameters
+        ----------
+        x : array_like
+            Time series data (1D).
+        max_lag : int or None
+            Maximum lag (in samples). If None, uses N-1.
+
+        Returns
+        -------
+        lags : ndarray
+            Array of integer lags.
+        cov : ndarray
+            Autocovariance at each lag.
+        """
+        x = np.asarray(x)
+        x = x - np.mean(x)
+
+        N = x.size
+        if max_lag is None:
+            max_lag = N - 1
+
+        # Zero-pad to avoid circular convolution
+        nfft = 2 * N
+        fx = np.fft.fft(x, n=nfft)
+        acf = np.fft.ifft(fx * np.conjugate(fx)).real
+
+        acf = acf[: max_lag + 1]
+        normalization = N - np.arange(max_lag + 1)
+
+        return np.arange(max_lag + 1), acf / normalization
+
+    @pytest.mark.skipif(
+        check_for_coreneuron(),
+        reason="OU process appears to cause error with CoreNEURON, needs further investigation",
+    )
+    def test_ou_processes(self, pplot=False):
+        # parameter setup
+        dt = 0.1
+        tmax = 10000.0
+        t_calibrate = 50.0
+        tau_ou = 5.0
+        sigma_ou = 0.005
+        mu_ou = 0.05
+
+        self._create_ball()
+        self.tree.init_model(t_calibrate=t_calibrate, dt=dt)
+        # add OU process
+        self.tree.add_ou_clamp(
+            loc=(1, 0.5),
+            mean=mu_ou,
+            stdev=sigma_ou,
+            tau=tau_ou,
+            delay=-t_calibrate / 2.0,
+            dur=tmax + t_calibrate / 2.0,
+            seed=46,
+        )
+
+        res = self.tree.run(tmax, record_from_iclamps=True)
+        self.tree.delete_model()
+
+        mu_ou_empirical = np.mean(res["i_clamp"][0, :])
+        cov_ou_empirical = np.cov(res["i_clamp"][0, :])
+
+        print(f"OU mean: exact={mu_ou:.10f} nA, empirical={mu_ou_empirical:.10f} nA")
+        print(
+            f"OU variance: exact={sigma_ou**2:.10f} nA^2, empirical={cov_ou_empirical:.10f} nA^2"
+        )
+
+        # check current statistics
+        assert np.abs(mu_ou_empirical - mu_ou) / np.abs(mu_ou) < 0.05
+        assert np.abs(cov_ou_empirical - sigma_ou**2) / sigma_ou**2 < 0.05
+
+        mu_exact, cov_exact = self._voltage_statistics(
+            delta_t=res["t"],
+            mu_ou=mu_ou,
+            sigma_ou=sigma_ou,
+            tau_ou=tau_ou,
+        )
+        mu_empirical = np.mean(res["v_m"][0, :])
+        cov_np = np.cov(res["v_m"][0, :])
+        _, cov_empirical = self._autocovariance_fft(res["v_m"][0, :])
+
+        print(
+            f"Voltage mean: exact={mu_exact:.10f} mV, empirical={mu_empirical:.10f} mV"
+        )
+        print(
+            f"Voltage variance: exact={cov_exact[0]:.10f} mV^2, empirical={cov_np:.10f} mV^2"
+        )
+
+        # check voltage statistics
+        assert np.abs(mu_empirical - mu_exact) / np.abs(mu_exact) < 0.05
+        assert np.abs(cov_np - cov_exact[0]) / cov_exact[0] < 0.1
+        assert (
+            np.mean(np.abs(cov_empirical[:500] - cov_exact[:500]) / cov_exact[0]) < 0.05
+        )
+
+        if pplot:
+            pl.figure(figsize=(12, 5))
+            ax = pl.subplot(1, 3, 1)
+            ax.plot(res["t"], res["v_m"][0, :])
+            ax.axhline(mu_exact)
+            ax.axhline(mu_empirical, color="orange")
+            ax = pl.subplot(1, 3, 2)
+            ax.plot(res["t"][:500], cov_exact[:500], label="Exact")
+            ax.plot(res["t"][:500], cov_empirical[:500], label="Empirical")
+            ax.axhline(cov_np, color="gray", linestyle="--", label="Empirical variance")
+            ax.legend(loc=0)
+            pl.show()
+
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
+    def test_input_spiketrain(self, pplot=False):
+        # parameter setup
+        dt = 0.1
+        tmax = 100.0
+        t_calibrate = 50.0
+        spktms1 = [10.0, 20.0, 40.0]
+        spktms2 = [15.0, 25.0, 45.0]
+
+        self._create_ball()
+        self.tree.init_model(t_calibrate=t_calibrate, dt=dt)
+        self.tree.add_double_exp_synapse(loc=(1, 0.5), tau1=0.2, tau2=3.0, e_r=0.0)
+        self.tree.add_double_exp_synapse(loc=(1, 0.5), tau1=0.2, tau2=3.0, e_r=0.0)
+        self.tree.set_spiketrain(0, 0.01, spktms1)
+        self.tree.set_spiketrain(1, 0.005, spktms2)
+        #     syn_idx=0,
+        #     spktms=spktms,
+        # )
+
+        res = self.tree.run(tmax)
+        self.tree.delete_model()
+
+        assert (
+            np.max(res["v_m"][0]) > res["v_m"][0, 0] + 0.1
+        )  # check for depolarization
+
+        if pplot:
+            pl.plot(res["t"], res["v_m"][0, :])
+            pl.show()
+
+
+def debug_print(pstr):
+
+    print(pstr)
+    try:
+        print(
+            os.listdir(
+                os.path.join(
+                    neat.__path__[0], "simulations/neuron/tmp/multichannel_test/arm64"
+                )
+            )
+        )
+    except FileNotFoundError as e:
+        print(e)
+
+
+if __name__ == "__main__":
+    # sys.exit(pytest.main(sys.argv[1:]))
+    # tn = TestNeuron()
+    # tn.test_passive(pplot=True)
+    # tn.test_active(pplot=True)
+    # tn.test_channel_recording()
+    # tn.test_recording_timestep()
+
+    # trn = TestReducedNeuron()
+    # trn.test_geometry1()
+    # trn.test_impedance_properties_1()
+    # trn.test_geometry2()
+    # trn.test_impedance_properties_2()
+
+    ts = TestStimuli()
+    # ts.test_i_clamp(pplot=True)
+    # ts.test_ou_processes()
+    ts.test_input_spiketrain(pplot=True)
