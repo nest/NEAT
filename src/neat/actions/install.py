@@ -22,12 +22,19 @@
 import os
 import sys
 import glob
+import stat
+import json
 import shutil
 import inspect
 import platform
+from pathlib import Path
 import importlib
 import subprocess
 
+try:
+    import neuron
+except ModuleNotFoundError:
+    pass
 
 from neat import IonChannel, ExpConcMech
 from neat.simulations.nest import nestml_tools
@@ -158,24 +165,239 @@ def _resolve_model_name(model_name, channel_path_arg):
     return model_name
 
 
-def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
+def get_local_bin_dir():
+    """
+    Get the most local bin directory based on the active environment.
+    Priority order:
+    1. Conda environment bin
+    2. Virtual environment bin (venv/virtualenv)
+    3. Docker container /usr/local/bin (if in container)
+    4. ~/.local/bin (fallback)
+
+    Returns:
+        Path: The bin directory to use
+    """
+
+    # 1. Check for conda environment
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if conda_prefix:
+        bin_dir = Path(conda_prefix) / "bin"
+        if bin_dir.exists() and bin_dir.is_dir():
+            env_name = os.environ.get("CONDA_DEFAULT_ENV", "unknown")
+            print(f"📦 Detected conda environment: {env_name}")
+            return bin_dir
+
+    # 2. Check for virtual environment (venv/virtualenv)
+    virtual_env = os.environ.get("VIRTUAL_ENV")
+    if virtual_env:
+        bin_dir = Path(virtual_env) / "bin"
+        if bin_dir.exists() and bin_dir.is_dir():
+            print(f"🐍 Detected Python virtual environment")
+            return bin_dir
+
+    # 3. Check if running in Docker container
+    if os.path.exists("/.dockerenv") or os.environ.get("DOCKER_CONTAINER"):
+        # In Docker, prefer /usr/local/bin for system-wide access
+        bin_dir = Path("/usr/local/bin")
+        if os.access(bin_dir, os.W_OK):
+            print(f"🐳 Detected Docker container")
+            print(f"   Using system bin (writable): {bin_dir}")
+            return bin_dir
+        else:
+            # If /usr/local/bin is not writable, fall back to user location
+            print(f"🐳 Detected Docker container")
+            print(f"   /usr/local/bin not writable, using user bin")
+
+    # 4. Fallback to ~/.local/bin
+    print(f"ℹ️  No specific environment detected")
+    return Path.home() / ".local" / "bin"
+
+
+def create_nrnspecial_wrapper(
+    special_path,
+    wrapper_name="python_with_my_nrn_model",
+    install_dir=None,
+    preloaded_model=None,
+):
+    """
+    Create a wrapper script for running Python with NEURON + CoreNEURON mechanisms
+
+    Args:
+        special_path: Path to the 'special' executable (e.g., /path/to/arm64/special)
+        wrapper_name: Name for the wrapper script
+        install_dir: Directory to install wrapper (default: auto-detect environment)
+        preloaded_model: Name of the NEURON model preloaded by the wrapper
+    """
+
+    # Set default install directory based on environment
+    if install_dir is None:
+        install_dir = get_local_bin_dir()
+        print(f"   Using directory: {install_dir}")
+        print()
+    else:
+        install_dir = Path(install_dir)
+        print(f"Using specified directory: {install_dir}")
+        print()
+
+    # Convert special_path to Path object and resolve to absolute path
+    special_path = Path(special_path).resolve()
+
+    # Check if special executable exists
+    if not special_path.exists():
+        print(f"Error: special executable not found at {special_path}", file=sys.stderr)
+        sys.exit(1)
+
+    if not special_path.is_file():
+        print(f"Error: {special_path} is not a file", file=sys.stderr)
+        sys.exit(1)
+
+    # Create install directory if it doesn't exist
+    if not install_dir.exists():
+        print(f"Creating directory: {install_dir}")
+        try:
+            install_dir.mkdir(parents=True, exist_ok=True)
+            print(f"✓ Created {install_dir}")
+            print()
+        except PermissionError:
+            print(f"Error: Permission denied creating {install_dir}", file=sys.stderr)
+            print(
+                f"Try running with sudo or choose a different directory",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    # Check write permissions
+    if not os.access(install_dir, os.W_OK):
+        print(f"Error: No write permission for {install_dir}", file=sys.stderr)
+        print(f"Try running with sudo or choose a different directory", file=sys.stderr)
+        sys.exit(1)
+
+    # Path for the wrapper script
+    wrapper_path = install_dir / wrapper_name
+
+    # Wrapper script content
+    wrapper_content = f"""#!/bin/bash
+# Wrapper to run Python scripts with NEURON + CoreNEURON mechanisms
+# Auto-generated wrapper for: {special_path}
+
+SPECIAL_PATH="{special_path}"
+PRELOADED_MODEL="{preloaded_model or ''}"
+
+# Check if special exists
+if [ ! -f "$SPECIAL_PATH" ]; then
+    echo "Error: special executable not found at $SPECIAL_PATH" >&2
+    exit 1
+fi
+
+# Mark that this wrapper preloads a specific NEURON/CoreNEURON model.
+if [ -n "$PRELOADED_MODEL" ]; then
+    export CORENEURON_PRELOADED_MODEL="$PRELOADED_MODEL"
+fi
+
+# Detect whether this process is part of an MPI launch.
+# We first key off MPI-specific size variables. For Slurm we additionally
+# require task context to avoid false positives in a plain allocation shell.
+USE_MPI=0
+for MPI_SIZE_VAR in OMPI_COMM_WORLD_SIZE PMI_SIZE PMIX_SIZE MV2_COMM_WORLD_SIZE; do
+    MPI_SIZE_VALUE="${{!MPI_SIZE_VAR:-}}"
+    if [[ "$MPI_SIZE_VALUE" =~ ^[0-9]+$ ]] && [ "$MPI_SIZE_VALUE" -gt 1 ]; then
+        USE_MPI=1
+        break
+    fi
+done
+
+if [ "$USE_MPI" -eq 0 ] && [ -n "${{SLURM_PROCID:-}}" ]; then
+    for SLURM_SIZE_VAR in SLURM_STEP_NUM_TASKS SLURM_NTASKS; do
+        SLURM_SIZE_VALUE="${{!SLURM_SIZE_VAR:-}}"
+        if [[ "$SLURM_SIZE_VALUE" =~ ^[0-9]+$ ]] && [ "$SLURM_SIZE_VALUE" -gt 1 ]; then
+            USE_MPI=1
+            break
+        fi
+    done
+fi
+
+# Run special with -python, and add -mpi only when the runtime indicates
+# a multi-rank launch.
+if [ "$USE_MPI" -eq 1 ]; then
+    exec "$SPECIAL_PATH" -mpi -python "$@"
+else
+    exec "$SPECIAL_PATH" -python "$@"
+fi
+"""
+    # Write the wrapper script
+    try:
+        with open(wrapper_path, "w") as f:
+            f.write(wrapper_content)
+
+        # Make it executable (chmod +x)
+        wrapper_path.chmod(
+            wrapper_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
+
+        print(f"✓ Created wrapper at: {wrapper_path}")
+        print()
+
+        # Check if install_dir is in PATH
+        path_dirs = os.environ.get("PATH", "").split(":")
+        if str(install_dir) in path_dirs:
+            print(f"✓ {install_dir} is already in your PATH")
+        else:
+            print(f"⚠ Warning: {install_dir} is not in your current PATH")
+
+            # Provide context-specific advice
+            if os.environ.get("CONDA_PREFIX"):
+                print(f"   This is unusual for an active conda environment.")
+                print(
+                    f"   Try: conda deactivate && conda activate {os.environ.get('CONDA_DEFAULT_ENV')}"
+                )
+            elif os.environ.get("VIRTUAL_ENV"):
+                print(f"   This is unusual for an active virtual environment.")
+                print(f"   Try deactivating and reactivating your environment.")
+            elif os.path.exists("/.dockerenv"):
+                print(f"   Add to your Dockerfile or docker run command:")
+                print(f'   ENV PATH="{install_dir}:$PATH"')
+            else:
+                print(f"   Add to your ~/.bashrc or ~/.zshrc:")
+                print(f'   export PATH="{install_dir}:$PATH"')
+
+        return wrapper_path
+
+    except Exception as e:
+        print(f"Error creating wrapper: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _get_neuron_build_metadata():
+    return {
+        "neuron_version": neuron.__version__,
+        "python_version": platform.python_version(),
+        "python_executable": os.path.realpath(sys.executable),
+        "platform_system": platform.system(),
+        "platform_machine": platform.machine(),
+    }
+
+
+def _compile_neuron(
+    model_name, path_neat, channels, path_neuronresource=None, codegen_opts=None
+):
+
+    print(f"path of this file: {__file__}   ")
 
     # combine `model_name` with the neuron compilation path
     path_for_neuron_compilation = os.path.join(
         path_neat, "simulations/neuron/tmp/", model_name
     )
+    # delete old compiled files if exist
+    if os.path.exists(path_for_neuron_compilation):
+        shutil.rmtree(path_for_neuron_compilation)
     path_for_mod_files = os.path.join(path_for_neuron_compilation, "mech/")
 
     print(f"--- writing channels to \n" f" > {path_for_mod_files}")
 
     # Create the "mech/" directory in a clean state
-    if os.path.exists(path_for_mod_files):
-        shutil.rmtree(path_for_mod_files)
     os.makedirs(path_for_mod_files)
 
-    # copy default mechanisms
-    # if path_neuronresource is not None:
-    #     shutil.copytree(path_neuronresource, path_for_mod_files)
+    # copy mechanisms from resource path
     if path_neuronresource is not None:
         for mod_file in glob.glob(os.path.join(path_neuronresource, "*.mod")):
             shutil.copy2(mod_file, path_for_mod_files)
@@ -184,26 +406,48 @@ def _compile_neuron(model_name, path_neat, channels, path_neuronresource=None):
         print(" - writing .mod file for:", chan.__class__.__name__)
         chan.write_mod_file(path_for_mod_files)
 
-    # # copy possible mod-files within the source directory to the compile directory
-    # for mod_file in glob.glob(os.path.join(path_for_channels, '*.mod')):
-    #     shutil.copy2(mod_file, path_for_mod_files)
-
     # change to directory where 'mech/' folder is located and compile the mechanisms
     os.chdir(path_for_neuron_compilation)
-    if os.path.exists(f"{platform.machine()}/"):  # delete old compiled files if exist
-        shutil.rmtree(f"{platform.machine()}/")
-    subprocess.call(["nrnivmodl", "mech/"])  # compile all mod files
+
+    if int(neuron.__version__.split(".")[0]) < 9:
+        subprocess.call(["nrnivmodl", "mech/"])  # compile all mod files
+    else:
+        subprocess.call(["nrnivmodl", "-coreneuron", "mech/"])  # compile all mod files
+
+    create_nrnspecial_wrapper(
+        special_path=os.path.join(
+            path_for_neuron_compilation,
+            f"{platform.machine()}/special",
+        ),
+        wrapper_name=f"python_with_{model_name}",
+        preloaded_model=model_name,
+    )
+
+    metadata_path = os.path.join(path_for_neuron_compilation, "build_info.json")
+    with open(metadata_path, "w") as metadata_file:
+        json.dump(_get_neuron_build_metadata(), metadata_file, indent=2, sort_keys=True)
 
     print(
         f"\n------------------------------\n"
         f"The compiled .mod-files can be loaded into neuron using:\n"
-        f'    neat.load_neuron_model("{model_name}")\n'
+        f'    neat.load_neuron_model("{model_name}")\n\n'
+        f"If you want to use the compiled .mod-files with CoreNEURON, use:\n"
+        f"    python_with_{model_name} my_script.py \n"
         f"------------------------------\n"
     )
 
 
-def _compile_nest(model_name, path_neat, channels, path_nestresource=None, ions=["ca"]):
+def _compile_nest(
+    model_name,
+    path_neat,
+    channels,
+    path_nestresource=None,
+    ions=["ca"],
+    codegen_opts=None,
+):
     from pynestml.frontend.pynestml_frontend import generate_nest_compartmental_target
+
+    print("!!! codegen_opts in _compile_nest:", codegen_opts)
 
     # assert that `model_name` is a pure name
     assert not "/" in model_name
@@ -250,7 +494,8 @@ def _compile_nest(model_name, path_neat, channels, path_nestresource=None, ions=
         input_path=nestml_file_path,
         target_path=path_for_nestml_compilation,
         module_name=model_name + "_module",
-        logging_level="DEBUG",
+        logging_level="INFO",
+        codegen_opts=codegen_opts,
     )
 
 
@@ -261,6 +506,7 @@ def _install_models(
     simulators=["neuron", "nest"],
     path_nestresource=None,
     path_neuronresource=None,
+    codegen_opts=None,
 ):
     """
     Compile a set of ion channels models specified by [channel_path_arg]
@@ -283,18 +529,36 @@ def _install_models(
         Optional path to a directory with .mod files, these modfiles will be
         copied to the NEURON install directory and compiled together with the
         generated channel .mod files
+    codegen_opts: dict
+        Extra options for code generation, passed as a JSON string. \n
+        Compartmental-specific options:
+        **NEST-specific options:**
+        - ``fp_precision``: ``"single"`` or ``"double"`` (default: ``"double"``).
+        - ``use_fastexp``: bool (default: ``False``). If ``True``, generated
+          code uses a fast polynomial approximation only for dynamic propagator
+          ``exp()`` terms in hot loops; all other exponentials use
+          ``std::exp``/``std::expf``.
     """
     model_name = _resolve_model_name(model_name, channel_path_arg)
 
     # collect the ion channels from the provide path arguments
     cpex = ChannelPathExtractor(path_neat, model_name)
     channels = cpex.collect_channels(*channel_path_arg)
+    codegen_opts = json.loads(codegen_opts) if codegen_opts else {}
 
     if "neuron" in simulators:
         _compile_neuron(
-            model_name, path_neat, channels, path_neuronresource=path_neuronresource
+            model_name,
+            path_neat,
+            channels,
+            path_neuronresource=path_neuronresource,
+            codegen_opts=codegen_opts,
         )
     if "nest" in simulators:
         _compile_nest(
-            model_name, path_neat, channels, path_nestresource=path_nestresource
+            model_name,
+            path_neat,
+            channels,
+            path_nestresource=path_nestresource,
+            codegen_opts=codegen_opts,
         )

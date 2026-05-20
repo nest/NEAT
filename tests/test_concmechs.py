@@ -39,8 +39,22 @@ try:
 except ImportError as e:
     WITH_NEST = False
 
-from neat import PhysTree, GreensTree, NeuronSimTree, CompartmentFitter
-from neat import NeuronCompartmentTree
+try:
+    import brian2
+    from neat import Brian2CompartmentTree
+
+    WITH_BRIAN2 = True
+except ImportError:
+    WITH_BRIAN2 = False
+
+from neat import (
+    PhysTree,
+    GreensTree,
+    NeuronSimTree,
+    CompartmentFitter,
+    NeuronCompartmentTree,
+    check_for_coreneuron,
+)
 import neat.channels.ionchannels as ionchannels
 from neat.factorydefaults import DefaultPhysiology
 
@@ -52,6 +66,10 @@ channel_installer.load_or_install_neuron_test_channels()
 CFG = DefaultPhysiology()
 MORPHOLOGIES_PATH_PREFIX = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "test_morphologies")
+)
+SKIP_ACTIVE_MECHS_WITH_CORENEURON = pytest.mark.skipif(
+    check_for_coreneuron(),
+    reason="Active mechanism tests are skipped when running with CoreNEURON",
 )
 
 
@@ -302,6 +320,7 @@ class TestConcMechs:
 
         return tree
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_string_representation(self):
         tree = self.load_ball(w_ca_conc=True)
 
@@ -342,6 +361,7 @@ class TestConcMechs:
 
         return res
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_spiking(self, pplot=False):
         tree_w_ca = self.load_axon_tree(w_ca_conc=True)
         tree_no_ca = self.load_axon_tree(w_ca_conc=False)
@@ -457,6 +477,7 @@ class TestConcMechs:
 
         return g_m_k
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_impedance(self, pplot=False, amp=0.001):
 
         tree0 = GreensTree(self.load_ball(w_ca_conc=False))
@@ -589,6 +610,7 @@ class TestConcMechs:
 
             pl.show()
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_fitting_ball(
         self, pplot=False, fit_tau=False, amp=0.1, eps_gamma=1e-6, eps_tau=1e-10
     ):
@@ -675,9 +697,11 @@ class TestConcMechs:
 
             pl.show()
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_taufit_ball(self, pplot=False):
         self.test_fitting_ball(fit_tau=True, pplot=pplot, eps_gamma=1e-3, eps_tau=1e-1)
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_fitting_ball_and_stick(self, pplot=False, amp=0.1):
         locs = [(1, 0.5), (4.0, 0.5), (5, 0.5)]
 
@@ -761,6 +785,7 @@ class TestConcMechs:
 
             pl.show()
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_finite_difference(self, rtol_param=5e-2, pprint=False):
         tree = self.load_axon_tree(w_ca_conc=True, gamma_factor=1e3)
         # finite difference ctree
@@ -843,6 +868,7 @@ class TestConcMechs:
             < np.abs(ctree[0].concmechs["ca"].gamma) * 1e-10
         )
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_localized_conc_mech_pas_axon(self):
         tree = self.load_passive_axon_tree(gamma_factor=1e3)
         self._run_localized_conc_mech(tree)
@@ -913,6 +939,48 @@ class TestConcMechs:
         res_nest["times"] -= cal
 
         return res_nest
+
+    def _simulate_brian2(self, simtree, amp=0.8, dur=100.0, delay=10.0, cal=100.0):
+        brian2.start_scope()
+        brian2.defaultclock.dt = 0.025 * brian2.ms
+
+        bneuron = simtree.init_model(
+            threshold="v > 1e9*volt",
+            refractory=0.0 * brian2.ms,
+        )
+
+        rec_vars = ["v"]
+        if "ca" in simtree._concentration_ions():
+            rec_vars.append("c_ca")
+
+        mon = brian2.StateMonitor(bneuron, rec_vars, record=True)
+        net = brian2.Network(brian2.collect())
+        post_stim_dur = max(0.0, 0.5 * dur - delay)
+
+        bneuron.I_ext = 0.0 * brian2.nA
+        net.run(cal * brian2.ms)
+
+        bneuron.I_ext = 0.0 * brian2.nA
+        net.run(delay * brian2.ms)
+
+        bneuron.I_ext = 0.0 * brian2.nA
+        bneuron.I_ext[0] = amp * brian2.nA
+        net.run(dur * brian2.ms)
+
+        bneuron.I_ext = 0.0 * brian2.nA
+        net.run(post_stim_dur * brian2.ms)
+
+        t = np.array(mon.t / brian2.ms)
+        mask = t >= cal
+
+        res = {
+            "t": t[mask] - cal,
+            "v_m": np.array([np.array(mon.v[0] / brian2.mV)[mask]]),
+        }
+        if "c_ca" in rec_vars:
+            res["ca"] = np.array([np.array(mon.c_ca[0])[mask]])
+
+        return res
 
     @pytest.mark.skipif(not WITH_NEST, reason="NEST not installed")
     def test_nest_neuron_sim_ball(
@@ -991,16 +1059,74 @@ class TestConcMechs:
 
             pl.show()
 
+    @pytest.mark.skipif(not WITH_BRIAN2, reason="Brian2 not installed")
+    def test_brian2_neuron_sim_ball(self, pplot=False, amp=0.1):
+        locs = [(1, 0.5)]
+        dur = 500.0
+        delay = 100.0
+        cal = 10000.0
+
+        tree = self.load_ball(w_ca_conc=True, gamma_factor=1e3)
+
+        cfit = CompartmentFitter(tree, save_cache=False, recompute_cache=True)
+        ctree, _ = cfit.fit_model(locs)
+
+        clocs = ctree.get_equivalent_locs()
+
+        res_neuron = self._simulate(
+            NeuronCompartmentTree(ctree),
+            clocs,
+            amp=amp,
+            dur=dur,
+            delay=delay,
+            cal=cal,
+            rec_currs=["ca"],
+        )
+
+        res_brian2 = self._simulate_brian2(
+            Brian2CompartmentTree(ctree, channel_storage=ctree.channel_storage),
+            amp=amp,
+            dur=dur,
+            delay=delay,
+            cal=cal,
+        )
+
+        t_cmp = res_neuron["t"]
+        v_neuron = res_neuron["v_m"][0]
+        ca_neuron = res_neuron["ca"][0]
+        v_brian2 = np.interp(t_cmp, res_brian2["t"], res_brian2["v_m"][0])
+        ca_brian2 = np.interp(t_cmp, res_brian2["t"], res_brian2["ca"][0])
+
+        assert np.allclose(v_neuron, v_brian2, atol=2.5)
+        assert np.allclose(ca_neuron, ca_brian2, atol=0.005)
+        assert np.sqrt(np.mean((v_neuron - v_brian2) ** 2)) < 0.01
+        assert np.sqrt(np.mean((ca_neuron - ca_brian2) ** 2)) < 0.0001
+
+        if pplot:
+            pl.figure("brian2--neuron")
+            ax = pl.subplot(211)
+
+            ax.plot(res_neuron["t"], res_neuron["v_m"][0], "r-", lw=1)
+            ax.plot(res_brian2["t"], res_brian2["v_m"][0], "b--", lw=1.3)
+
+            ax = pl.subplot(212)
+
+            ax.plot(res_neuron["t"], res_neuron["ca"][0], "r-", lw=1)
+            ax.plot(res_brian2["t"], res_brian2["ca"][0], "b--", lw=1.3)
+
+            pl.show()
+
 
 if __name__ == "__main__":
     tcm = TestConcMechs()
-    tcm.test_string_representation()
-    tcm.test_spiking(pplot=True)
-    tcm.test_impedance(pplot=True)
-    tcm.test_fitting_ball(pplot=True)
-    tcm.test_taufit_ball(pplot=True)
-    tcm.test_fitting_ball_and_stick(pplot=True)
-    tcm.test_finite_difference()
-    tcm.test_localized_conc_mech_pas_axon()
-    tcm.test_localized_conc_mech_act_axon()
-    tcm.test_nest_neuron_sim_ball(pplot=True, amp=2.0)
+    # tcm.test_string_representation()
+    # tcm.test_spiking(pplot=True)
+    # tcm.test_impedance(pplot=True)
+    # tcm.test_fitting_ball(pplot=True)
+    # tcm.test_taufit_ball(pplot=True)
+    # tcm.test_fitting_ball_and_stick(pplot=True)
+    # tcm.test_finite_difference()
+    # tcm.test_localized_conc_mech_pas_axon()
+    # tcm.test_localized_conc_mech_act_axon()
+    # tcm.test_nest_neuron_sim_ball(pplot=True, amp=2.0)
+    # tcm.test_brian2_neuron_sim_ball(pplot=True)

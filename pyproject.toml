@@ -55,7 +55,7 @@ dependencies = [
     "sympy >= 1.10.1",
     "pytest >= 7.1.2",
     "scikit_learn >= 1.1.1",
-    "neuron >= 8.2.0, <= 8.2.6",
+    "neuron >= 8.2.0",
     "dill >= 0.3.8",
 ]
 
@@ -75,6 +75,9 @@ docs = [
     "pytest>=7.1.2",
     "scikit_learn>=1.1.1",
     "dill>=0.3.8",
+]
+brian2 = [
+    "brian2 >= 2.9.0",
 ]
 
 [tool.setuptools.packages.find]

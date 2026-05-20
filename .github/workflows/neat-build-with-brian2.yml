@@ -1,0 +1,56 @@
+# -*- coding: utf-8 -*-
+#
+# neat-build-with-brian2.yml
+#
+# This file is part of NEST.
+#
+# Copyright (C) 2004 The NEST Initiative
+#
+# NEST is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# NEST is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with NEST.  If not, see <http://www.gnu.org/licenses/>.
+
+name: NEAT build with Brian2
+
+on: [push, pull_request, workflow_dispatch]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_and_test_neat_with_brian2:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+      fail-fast: false
+
+    steps:
+      - name: Checkout NEAT code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install NEAT with Brian2
+        run: |
+          pip install setuptools
+          pip install ".[brian2]"
+
+      - name: Run Brian2 tests
+        run: |
+          pytest -s -o norecursedirs='*' -o log_cli=true -o log_cli_level="DEBUG" \
+            tests/test_brian2tree.py \
+            tests/test_concmechs.py::TestConcMechs::test_brian2_neuron_sim_ball
