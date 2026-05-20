@@ -113,10 +113,25 @@ class NeuronMechanismLoadError(RuntimeError):
     pass
 
 
+_LOADED_NEURON_MODELS = set()
+
+
 def _normalize_executable_path(path):
     if path is None:
         return None
     return os.path.realpath(path)
+
+
+def _normalize_model_path(path):
+    return os.path.realpath(path)
+
+
+def _is_neuron_model_loaded(model_path):
+    return _normalize_model_path(model_path) in _LOADED_NEURON_MODELS
+
+
+def _mark_neuron_model_loaded(model_path):
+    _LOADED_NEURON_MODELS.add(_normalize_model_path(model_path))
 
 
 def _get_neuron_runtime_metadata():
@@ -194,9 +209,12 @@ def load_neuron_model(name):
             f"tmp/{name}/{platform.machine()}/.libs/libnrnmech.so",
         )
         if os.path.exists(path):
+            if _is_neuron_model_loaded(model_path):
+                return
             _validate_neuron_build_metadata(model_path)
             try:
                 h.nrn_load_dll(path)  # load all mechanisms
+                _mark_neuron_model_loaded(model_path)
             except Exception as err:
                 if should_wrap_load_exception(err):
                     raise_load_err(path, err)
@@ -211,6 +229,9 @@ def load_neuron_model(name):
         )
         if os.path.exists(model_path):
             print(f"Found path: {model_path}, loading mechanisms...")
+            if _is_neuron_model_loaded(model_path):
+                print("... already loaded.")
+                return
             _validate_neuron_build_metadata(model_path)
             if not USE_CORENEURON:
                 # only needs to be loaded if we are not running using special
@@ -224,6 +245,7 @@ def load_neuron_model(name):
                     raise FileNotFoundError(
                         f"Loading mechanisms from '{model_path}' failed."
                     )
+            _mark_neuron_model_loaded(model_path)
             print(f"... done.")
         else:
             print_err()
