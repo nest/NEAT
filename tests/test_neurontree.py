@@ -44,7 +44,10 @@ channel_installer.load_or_install_neuron_test_channels()
 MORPHOLOGIES_PATH_PREFIX = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "test_morphologies")
 )
-ON_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
+SKIP_ACTIVE_MECHS_WITH_CORENEURON = pytest.mark.skipif(
+    check_for_coreneuron(),
+    reason="Active mechanism tests are skipped when running with CoreNEURON",
+)
 colours = [
     "DeepPink",
     "Purple",
@@ -224,10 +227,7 @@ class TestNeuron:
                     jj += 1
             pl.show()
 
-    @pytest.mark.skipif(
-        check_for_coreneuron() and ON_GITHUB_ACTIONS,
-        reason="CoreNEURON active impedance test aborts on GitHub Actions",
-    )
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_active(self, pplot=False):
         self.load_T_tree_active()
         # set of locations
@@ -285,6 +285,7 @@ class TestNeuron:
                     jj += 1
             pl.show()
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_channel_recording(self):
         self.load_T_tree_test_channel()
         # set of locations

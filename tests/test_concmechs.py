@@ -47,8 +47,14 @@ try:
 except ImportError:
     WITH_BRIAN2 = False
 
-from neat import PhysTree, GreensTree, NeuronSimTree, CompartmentFitter
-from neat import NeuronCompartmentTree
+from neat import (
+    PhysTree,
+    GreensTree,
+    NeuronSimTree,
+    CompartmentFitter,
+    NeuronCompartmentTree,
+    check_for_coreneuron,
+)
 import neat.channels.ionchannels as ionchannels
 from neat.factorydefaults import DefaultPhysiology
 
@@ -60,6 +66,10 @@ channel_installer.load_or_install_neuron_test_channels()
 CFG = DefaultPhysiology()
 MORPHOLOGIES_PATH_PREFIX = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "test_morphologies")
+)
+SKIP_ACTIVE_MECHS_WITH_CORENEURON = pytest.mark.skipif(
+    check_for_coreneuron(),
+    reason="Active mechanism tests are skipped when running with CoreNEURON",
 )
 
 
@@ -310,6 +320,7 @@ class TestConcMechs:
 
         return tree
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_string_representation(self):
         tree = self.load_ball(w_ca_conc=True)
 
@@ -350,6 +361,7 @@ class TestConcMechs:
 
         return res
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_spiking(self, pplot=False):
         tree_w_ca = self.load_axon_tree(w_ca_conc=True)
         tree_no_ca = self.load_axon_tree(w_ca_conc=False)
@@ -465,6 +477,7 @@ class TestConcMechs:
 
         return g_m_k
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_impedance(self, pplot=False, amp=0.001):
 
         tree0 = GreensTree(self.load_ball(w_ca_conc=False))
@@ -597,6 +610,7 @@ class TestConcMechs:
 
             pl.show()
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_fitting_ball(
         self, pplot=False, fit_tau=False, amp=0.1, eps_gamma=1e-6, eps_tau=1e-10
     ):
@@ -683,9 +697,11 @@ class TestConcMechs:
 
             pl.show()
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_taufit_ball(self, pplot=False):
         self.test_fitting_ball(fit_tau=True, pplot=pplot, eps_gamma=1e-3, eps_tau=1e-1)
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_fitting_ball_and_stick(self, pplot=False, amp=0.1):
         locs = [(1, 0.5), (4.0, 0.5), (5, 0.5)]
 
@@ -769,6 +785,7 @@ class TestConcMechs:
 
             pl.show()
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_finite_difference(self, rtol_param=5e-2, pprint=False):
         tree = self.load_axon_tree(w_ca_conc=True, gamma_factor=1e3)
         # finite difference ctree
