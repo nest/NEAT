@@ -809,20 +809,6 @@ class CompartmentTree(STree):
         for node in self:
             node.expansion_points = {}
 
-    def fit_e_leak(self):
-        """
-        Fit the leak reversal potential to obtain the stored equilibirum potentials
-        as resting membrane potential
-        """
-        e_l_0 = self.get_e_eq(indexing="tree")
-        # compute the solutions
-        fun = self._fun_e_leak_fit(e_l_0)
-        jac = self._jac_e_leak_fit(e_l_0)
-        e_l = np.linalg.solve(jac, -fun + np.dot(jac, e_l_0))
-        # set the leak reversals
-        for ii, node in enumerate(self):
-            node.currents["L"] = [node.currents["L"][0], e_l[ii]]
-
     def _fun_e_leak_fit(self, e_l):
         # set the leak reversal potentials
         for ii, node in enumerate(self):
@@ -838,14 +824,16 @@ class CompartmentTree(STree):
             for cnode in node.child_nodes:
                 fun_vals[ii] += cnode.g_c * (node.e_eq - cnode.e_eq)
         return fun_vals
-
+    
     def _jac_e_leak_fit(self, e_l):
         for ii, node in enumerate(self):
             node.currents["L"][1] = e_l[ii]
-        jac_vals = np.array([-node.currents["L"][0] for node in self])
-        return np.diag(jac_vals)
-    
-    def fit_e_leak_(self):
+        return np.ma.masked_array(
+            [-node.currents["L"][0] for node in self],
+            mask=[node.currents["L"][0] < 1e-16 for node in self],
+        )
+
+    def fit_e_leak(self):
         """
         Fit the leak reversal potential to obtain the stored equilibirum potentials
         as resting membrane potential
@@ -853,21 +841,12 @@ class CompartmentTree(STree):
         e_l_0 = self.get_e_eq(indexing="tree")
 
         fun = self._fun_e_leak_fit(e_l_0)
-        jac = self._jac_e_leak_fit_(e_l_0)
+        jac = self._jac_e_leak_fit(e_l_0)
         e_l = (-fun + jac * e_l_0) / jac
         # set the leak reversals
         for ii, node in enumerate(self):
             if not e_l.mask[ii]:
                 node.currents["L"] = [node.currents["L"][0], e_l[ii]]
-
-    def _jac_e_leak_fit_(self, e_l):
-        for ii, node in enumerate(self):
-            node.currents["L"][1] = e_l[ii]
-        return np.ma.masked_array(
-            [-node.currents["L"][0] for node in self],
-            mask=[node.currents["L"][0] < 1e-16 for node in self],
-        )
-    
 
     def add_channel_current(self, channel, e_rev):
         """
