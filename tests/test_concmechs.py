@@ -868,6 +868,7 @@ class TestConcMechs:
             < np.abs(ctree[0].concmechs["ca"].gamma) * 1e-10
         )
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_localized_conc_mech_pas_axon(self):
         tree = self.load_passive_axon_tree(gamma_factor=1e3)
         self._run_localized_conc_mech(tree)
