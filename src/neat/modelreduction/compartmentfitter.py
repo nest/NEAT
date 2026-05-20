@@ -1197,6 +1197,7 @@ class CompartmentFitter(EquilibriumTree):
         ctree, locs = self.convert_fit_arg(fit_arg)
 
         # compute the equilibirum potentials at fit locations
+        # v_eqs_fit, conc_eqs_fit = self.calc_e_eq(locs)
         v_eqs_fit, conc_eqs_fit = self.calc_e_eq(locs)
 
         # set the equilibria
