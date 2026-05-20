@@ -124,6 +124,8 @@ Documentation
    bibliography
    auto_examples/index
    glossary
+   Impressum <https://nest-initiative.org/impressum/>
+   Data protection <https://www.nest-initiative.org/data-protection/>
 
 Indices and tables
 ------------------
