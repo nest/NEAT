@@ -30,7 +30,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = 'nest-neat'
-version = '1.0-rc2'
+version = '1.0'
 authors = [
     {name = 'Willem Wybo'}, 
     {name = 'Jakob Jordan'}, 
@@ -75,6 +75,9 @@ docs = [
     "pytest>=7.1.2",
     "scikit_learn>=1.1.1",
     "dill>=0.3.8",
+]
+brian2 = [
+    "brian2 >= 2.9.0",
 ]
 
 [tool.setuptools.packages.find]

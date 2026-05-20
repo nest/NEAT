@@ -911,7 +911,7 @@ class CompartmentFitter(EquilibriumTree):
             np.set_printoptions(precision=8, edgeitems=3, linewidth=75, suppress=False)
 
         if pplot:
-            self.plot_kernels(alphas, phimat)
+            self.plot_kernels(fit_arg, alphas=alphas, phimat=phimat)
 
         return ctree, locs
 
@@ -1050,7 +1050,7 @@ class CompartmentFitter(EquilibriumTree):
         if alphas is None or phimat is None:
             alphas, phimat, _, _ = self._calc_sov_mats(fit_locs, pprint=False)
 
-        k_orig, k_comp = self.get_kernels(ctree, alphas=alphas, phimat=phimat)
+        k_orig, k_comp = self.get_kernels(fit_arg, alphas=alphas, phimat=phimat)
 
         if t_arr is None:
             t_arr = np.linspace(0.0, 200.0, int(1e3))
@@ -1136,7 +1136,7 @@ class CompartmentFitter(EquilibriumTree):
             inds=alpha_inds,
             force_tau_m_fit=force_tau_m_fit,
             pprint=pprint,
-            pplot=False,
+            pplot=True,
         )
 
         _, fit_locs = self.convert_fit_arg(fit_arg)

@@ -10,3 +10,5 @@ Benjamin Ellenberger
 Benjamin Torben-Nielsen
 
 Jessica Mitchell
+
+Dennis Terhorst

@@ -33,7 +33,6 @@ from ..trees.greenstree import GreensTree, GreensTreeTime
 from ..trees.sovtree import SOVTree
 from ..trees.netree import NET, NETNode
 
-
 try:
     from ..simulations.neuron import neuronmodel as neurm
 except ModuleNotFoundError:

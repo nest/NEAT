@@ -23,7 +23,6 @@ import os
 import copy
 import warnings
 
-
 PERMITTED_BLOCK_NAMES = [
     "parameters",
     "state",

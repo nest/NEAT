@@ -33,7 +33,6 @@ from ..channels import ionchannels
 from ..tools import kernelextraction as ke
 from ..factorydefaults import DefaultPhysiology
 
-
 CFG = DefaultPhysiology()
 
 
@@ -989,7 +988,7 @@ class GreensTreeTime(GreensTree):
                     dcrt_dt[channel_name][svar_name] = {}
 
                     # convert frequency impedances to time domain kernels
-                    (crt[channel_name][svar_name], dcrt_dt[channel_name][svar_name]) = (
+                    crt[channel_name][svar_name], dcrt_dt[channel_name][svar_name] = (
                         self.ft.inverse_fourier(
                             crf[channel_name][svar_name],
                             method=method,

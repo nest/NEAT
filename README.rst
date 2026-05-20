@@ -36,14 +36,20 @@ Installation
 
 **Install**
 
-Note: The following instructions are for Linux and Max OSX systems and only use
-command line tools. Please follow the appropriate manuals for Windows systems or
-tools with graphical interfaces. The most recent version, NEAT 1.0-rc1 can be 
-installed from the master branch.
+NEAT can be installed with pip.
 
 .. code-block:: shell
 
-   git clone git@github.com:unibe-cns/NEAT.git
+   pip install nest-neat
+
+NEAT can also be installed from the source repository. The following 
+instructions are for Linux and Max OSX systems and only use command 
+line tools. Please follow the appropriate manuals for Windows systems or
+tools with graphical interfaces. 
+
+.. code-block:: shell
+
+   git clone git@github.com:nest/NEAT.git
    cd NEAT
    pip install .
 
@@ -51,12 +57,12 @@ installed from the master branch.
 
 Note that if you install NEAT with pip, as above, NEURON will automatically be installed as well.
 To use NEAT with `NEST <https://nest-simulator.readthedocs.io/en/stable/index.html>`_, 
-you need to manually install NEST on your system, by following the detailed
+you need to manually install NEST and nestml on your system, by following the detailed
 `installation instructions <https://nest-simulator.readthedocs.io/en/stable/installation/index.html>`_.
 
 **Testing the installation**
 
-NEAT make the shell command `neatmodels` available to compile NEAT-defined ion channels
+NEAT makes the shell command `neatmodels` available to compile NEAT-defined ion channels
 into for NEURON or NEST, so that they can be simulated.
 You can test whether this command is available by installing the default ion channels of NEAT:
 
