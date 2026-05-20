@@ -24,7 +24,6 @@ from ..factorydefaults import DefaultPhysiology
 import sympy as sp
 import numpy as np
 
-
 CFG = DefaultPhysiology()
 
 

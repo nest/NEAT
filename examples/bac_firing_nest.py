@@ -2,7 +2,7 @@
 Bac firing NEST
 ===============
 
-``compilechannels nest models/channels/channels_hay.py --name bac_firing --nestmlresource bac_firing_syns.nestml``
+``neatmodels install bac_firing -s nest -p models/channels/channels_hay.py --nestmlresource bac_firing_syns.nestml``
 """
 
 import numpy as np

@@ -3220,6 +3220,11 @@ class MorphTree(STree):
                         **plotargs,
                     )
                 node_line_associators.update({str(ii): node})
+            else:
+                # node is soma, draw as circle if necessary
+                if draw_soma_circle:
+                    circ = patches.Circle(node.xyz[0:2], node.R, color=plotargs["c"])
+                    ax.add_patch(circ)
         ax.axes.get_xaxis().set_visible(0)
         ax.axes.get_yaxis().set_visible(0)
         ax.axison = 0

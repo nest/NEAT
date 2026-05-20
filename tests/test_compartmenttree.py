@@ -27,16 +27,27 @@ import pytest
 import random
 import copy
 
-from neat import SOVTree, SOVNode, Kernel, GreensTree, CompartmentTree, CompartmentNode
+from neat import (
+    SOVTree,
+    SOVNode,
+    Kernel,
+    GreensTree,
+    CompartmentTree,
+    CompartmentNode,
+    check_for_coreneuron,
+)
 import neat.tools.kernelextraction as ke
 
 # from neat.channels.channelcollection import channelcollection
 
 import channelcollection_for_tests as channelcollection
 
-
 MORPHOLOGIES_PATH_PREFIX = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "test_morphologies")
+)
+SKIP_ACTIVE_MECHS_WITH_CORENEURON = pytest.mark.skipif(
+    check_for_coreneuron(),
+    reason="Active mechanism tests are skipped when running with CoreNEURON",
 )
 
 
@@ -370,6 +381,7 @@ class TestCompartmentTree:
         self.sov_tree = SOVTree(self.greens_tree)
         self.sov_tree.calc_sov_equations(maxspace_freq=100.0)
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_channel_fit(self):
         self.load_ball()
         locs = [(1, 0.5)]

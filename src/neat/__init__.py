@@ -56,9 +56,11 @@ from .trees.compartmenttree import CompartmentNode
 
 try:
     from .simulations.neuron.neuronmodel import load_neuron_model
+    from .simulations.neuron.neuronmodel import NeuronMechanismLoadError
     from .simulations.neuron.neuronmodel import NeuronSimTree
     from .simulations.neuron.neuronmodel import NeuronSimNode
     from .simulations.neuron.neuronmodel import NeuronCompartmentTree
+    from .simulations.neuron.neuronmodel import check_for_coreneuron
 except ModuleNotFoundError:
     warnings.warn("NEURON not available", UserWarning)
 
@@ -68,6 +70,12 @@ try:
     from .simulations.nest.nestmodel import load_nest_model
 except ModuleNotFoundError:
     warnings.warn("NEST not available", UserWarning)
+
+try:
+    from .simulations.brian2.brian2model import Brian2CompartmentTree
+    from .simulations.brian2.brian2model import Brian2CompartmentNode
+except ModuleNotFoundError:
+    warnings.warn("Dendrify not available", UserWarning)
 
 from .tools.kernelextraction import FourierQuadrature
 from .tools.kernelextraction import FourierTools

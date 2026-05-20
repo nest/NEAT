@@ -81,6 +81,11 @@ def parse_cmd_args(path_neat):
         "Only used when the [action] is 'install'.",
     )
     parser.add_argument(
+        "--codegen_opts",
+        default="",
+        help="Extra options for code generation, passed as a JSON string. \n",
+    )
+    parser.add_argument(
         "-p",
         "--path",
         nargs="*",
@@ -118,6 +123,7 @@ def main():
             simulators=cmd_args.simulator,
             path_neuronresource=cmd_args.neuronresource,
             path_nestresource=cmd_args.nestresource,
+            codegen_opts=cmd_args.codegen_opts,
         )
     elif cmd_args.action == "list":
         _list_models(path_neat=path_neat, simulators=cmd_args.simulator)

@@ -27,7 +27,6 @@ import pytest
 from neat import SOVTree, SOVNode, Kernel, GreensTree
 import neat.tools.kernelextraction as ke
 
-
 MORPHOLOGIES_PATH_PREFIX = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "test_morphologies")
 )

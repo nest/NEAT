@@ -824,21 +824,41 @@ class CompartmentFitter(EquilibriumTree):
             The corresponding list of fit locations.
         """
         ctree, locs = self.convert_fit_arg(fit_arg)
+
         # compute SOV matrices for fit
-        alphas, phimat, importance, sov_tree = self._calc_sov_mats(locs, pprint=pprint)
+        try:
+            alphas, phimat, importance, sov_tree = self._calc_sov_mats(
+                locs, pprint=pprint
+            )
+            # fit the capacitances from SOV time-scales
+            ctree.compute_c(
+                -alphas[inds] * 1e3, phimat[inds, :], weights=importance[inds]
+            )
 
-        # fit the capacitances from SOV time-scales
-        ctree.compute_c(-alphas[inds] * 1e3, phimat[inds, :], weights=importance[inds])
+            def calcTau():
+                nm = len(locs)
+                # original timescales
+                taus_orig = np.sort(np.abs(1.0 / alphas))[::-1][:nm]
+                # fitted timescales
+                lambdas, _, _ = ctree.calc_eigenvalues()
+                taus_fit = np.sort(np.abs(1.0 / lambdas))[::-1]
 
-        def calcTau():
-            nm = len(locs)
-            # original timescales
-            taus_orig = np.sort(np.abs(1.0 / alphas))[::-1][:nm]
-            # fitted timescales
-            lambdas, _, _ = ctree.calc_eigenvalues()
-            taus_fit = np.sort(np.abs(1.0 / lambdas))[::-1]
+                return taus_orig, taus_fit
 
-            return taus_orig, taus_fit
+            taus_orig, taus_fit = calcTau()
+
+            if check_fit:
+                fit_not_sane = np.abs(taus_fit[0] - taus_orig[0]) > 0.8 * taus_orig[0]
+            else:
+                fit_not_sane = False
+
+        except Exception as e:
+            if pprint:
+                print(
+                    f"Issue in SOV calculations:\n{e}\n> reverting to membrane timescale matching"
+                )
+            sov_tree = self.create_tree_sov()
+            fit_not_sane = True
 
         def calcTauM():
             clocs = [locs[n.loc_idx] for n in ctree]
@@ -857,10 +877,7 @@ class CompartmentFitter(EquilibriumTree):
 
             return taus_m_orig, taus_m_fit
 
-        taus_orig, taus_fit = calcTau()
-        if (
-            check_fit and np.abs(taus_fit[0] - taus_orig[0]) > 0.8 * taus_orig[0]
-        ) or force_tau_m_fit:
+        if fit_not_sane or force_tau_m_fit:
 
             taus_m_orig, taus_m_fit = calcTauM()
             # if fit was not sane, revert to more basic membrane timescale match
@@ -894,7 +911,7 @@ class CompartmentFitter(EquilibriumTree):
             np.set_printoptions(precision=8, edgeitems=3, linewidth=75, suppress=False)
 
         if pplot:
-            self.plot_kernels(alphas, phimat)
+            self.plot_kernels(fit_arg, alphas=alphas, phimat=phimat)
 
         return ctree, locs
 
@@ -1033,7 +1050,7 @@ class CompartmentFitter(EquilibriumTree):
         if alphas is None or phimat is None:
             alphas, phimat, _, _ = self._calc_sov_mats(fit_locs, pprint=False)
 
-        k_orig, k_comp = self.get_kernels(ctree, alphas=alphas, phimat=phimat)
+        k_orig, k_comp = self.get_kernels(fit_arg, alphas=alphas, phimat=phimat)
 
         if t_arr is None:
             t_arr = np.linspace(0.0, 200.0, int(1e3))
@@ -1119,7 +1136,7 @@ class CompartmentFitter(EquilibriumTree):
             inds=alpha_inds,
             force_tau_m_fit=force_tau_m_fit,
             pprint=pprint,
-            pplot=False,
+            pplot=True,
         )
 
         _, fit_locs = self.convert_fit_arg(fit_arg)
