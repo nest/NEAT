@@ -1106,6 +1106,7 @@ class TestStimuli:
             ax.legend(loc=0)
             pl.show()
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
     def test_input_spiketrain(self, pplot=False):
         # parameter setup
         dt = 0.1
