@@ -27,8 +27,8 @@ Documentation
 -------------
 
 Documentation for an older version of NEAT (0.9.2) available `here <https://neatdend.readthedocs.io>`_
-Note that a new documentation website for the current version (1.0-rc1) is currently
-under construction. Please see the changelog (`changelog/v.1.0.md`) for an overview of
+Note that a new documentation website for the current version (1.1) is currently
+under construction. Please see the changelog (`changelog/v1.1.md`) for an overview of
 the changes.
 
 Installation

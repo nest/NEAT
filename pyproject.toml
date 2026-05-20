@@ -30,7 +30,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = 'nest-neat'
-version = '1.0'
+version = '1.1'
 authors = [
     {name = 'Willem Wybo'}, 
     {name = 'Jakob Jordan'}, 
@@ -92,5 +92,5 @@ neatmodels = "neat.actions.neatmodels:main"
 
 [project.urls]
 Documentation = "https://neatdend.readthedocs.io/"
-Repository = "https://github.com/unibe-cns/NEAT"
-Changelog = "https://github.com/unibe-cns/NEAT/blob/master/changelog/v1.0.0.md"
+Repository = "https://github.com/nest/NEAT"
+Changelog = "https://github.com/nest/NEAT/blob/master/changelog/v1.1.md"
