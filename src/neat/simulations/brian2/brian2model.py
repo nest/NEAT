@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# neuronmodel.py
+# brian2model.py
 #
 # This file is part of NEST.
 #
