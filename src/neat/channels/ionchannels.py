@@ -169,6 +169,134 @@ class CallDict(SPDict):
         return SPDict({str(k): f(*args) for k, f in self.items()})
 
 
+def _safe_simplify(expr):
+    if expr.has(sp.Piecewise):
+        return expr
+    else:
+        return sp.simplify(expr)
+
+
+def _nmodl_ccode(expr):
+    return " ".join(sp.printing.ccode(expr).replace(";", "").split())
+
+
+def _rebuild_sympy_expr(expr, args):
+    try:
+        return expr.func(*args, evaluate=False)
+    except TypeError:
+        return expr.func(*args)
+
+
+def _nmodl_boolean_assignment_lines(lhs, expr, temp_counter=0):
+    expr = sp.sympify(expr)
+
+    if expr == True or expr == sp.true:
+        return [f"{lhs} = 1"], temp_counter, []
+    if expr == False or expr == sp.false:
+        return [f"{lhs} = 0"], temp_counter, []
+
+    lines, expr, temp_counter, locals_ = _hoist_piecewise_for_nmodl(expr, temp_counter)
+    if getattr(expr, "is_Boolean", False):
+        lines += [
+            f"if ({_nmodl_ccode(expr)}) {{",
+            f"    {lhs} = 1",
+            "}",
+            "else {",
+            f"    {lhs} = 0",
+            "}",
+        ]
+    else:
+        lines.append(f"{lhs} = {_nmodl_ccode(expr)}")
+    return lines, temp_counter, locals_
+
+
+def _hoist_piecewise_for_nmodl(expr, temp_counter=0):
+    expr = sp.sympify(expr)
+
+    if expr.func == sp.ITE:
+        temp = sp.symbols(f"pw{temp_counter}")
+        temp_counter += 1
+        test, then_value, else_value = expr.args
+        lines, test_expr, temp_counter, locals_ = _hoist_piecewise_for_nmodl(
+            test, temp_counter
+        )
+        then_lines, temp_counter, then_locals = _nmodl_boolean_assignment_lines(
+            temp, then_value, temp_counter
+        )
+        else_lines, temp_counter, else_locals = _nmodl_boolean_assignment_lines(
+            temp, else_value, temp_counter
+        )
+        locals_ = [str(temp)] + locals_ + then_locals + else_locals
+        lines += [f"if ({_nmodl_ccode(test_expr)}) {{"]
+        lines.extend("    " + line for line in then_lines)
+        lines += ["}", "else {"]
+        lines.extend("    " + line for line in else_lines)
+        lines.append("}")
+        return lines, temp, temp_counter, locals_
+
+    if isinstance(expr, sp.Piecewise):
+        temp = sp.symbols(f"pw{temp_counter}")
+        temp_counter += 1
+        lines = []
+        locals_ = [str(temp)]
+        branch_specs = []
+
+        for value, condition in expr.args:
+            condition_lines, condition_expr, temp_counter, condition_locals = (
+                _hoist_piecewise_for_nmodl(condition, temp_counter)
+            )
+            value_lines, value_expr, temp_counter, value_locals = (
+                _hoist_piecewise_for_nmodl(value, temp_counter)
+            )
+            lines.extend(condition_lines)
+            locals_.extend(condition_locals)
+            branch_specs.append((condition_expr, value_lines, value_expr, value_locals))
+
+        for branch_index, (condition, value_lines, value_expr, value_locals) in enumerate(branch_specs):
+            locals_.extend(value_locals)
+            if condition == True or condition == sp.true:
+                lines.append("else {")
+            else:
+                condition_code = _nmodl_ccode(condition)
+                if branch_index == 0:
+                    lines.append(f"if ({condition_code}) {{")
+                else:
+                    lines.append(f"else if ({condition_code}) {{")
+            lines.extend("    " + line for line in value_lines)
+            lines.append(f"    {temp} = {_nmodl_ccode(value_expr)}")
+            lines.append("}")
+
+        if lines and lines[0] == "else {":
+            lines = [f"{temp} = {_nmodl_ccode(branch_specs[0][2])}"]
+
+        return lines, temp, temp_counter, locals_
+
+    if not expr.args:
+        return [], expr, temp_counter, []
+
+    lines = []
+    locals_ = []
+    new_args = []
+    for arg in expr.args:
+        arg_lines, arg_expr, temp_counter, arg_locals = _hoist_piecewise_for_nmodl(
+            arg, temp_counter
+        )
+        lines.extend(arg_lines)
+        locals_.extend(arg_locals)
+        new_args.append(arg_expr)
+
+    if any(new_arg != old_arg for new_arg, old_arg in zip(new_args, expr.args)):
+        expr = _rebuild_sympy_expr(expr, new_args)
+
+    return lines, expr, temp_counter, locals_
+
+
+def _nmodl_assignment_lines(lhs, expr, temp_counter=0):
+    lines, expr, temp_counter, locals_ = _hoist_piecewise_for_nmodl(expr, temp_counter)
+    lines.append(f"{lhs} = {_nmodl_ccode(expr)}")
+    return lines, temp_counter, locals_
+
+
 class IonChannel(object):
     """
     Base ion channel class that implements linearization and code generation for
@@ -313,8 +441,8 @@ class IonChannel(object):
             if key in (self.varinf.keys() | self.tauinf.keys()):
                 self.varinf[svar] = sp.sympify(self.varinf[key], evaluate=False)
                 self.tauinf[svar] = sp.sympify(self.tauinf[key], evaluate=False)
-                self.varinf[svar] = sp.simplify(self.varinf[svar])
-                self.tauinf[svar] = sp.simplify(self.tauinf[svar] / self.q10)
+                self.varinf[svar] = _safe_simplify(self.varinf[svar])
+                self.tauinf[svar] = _safe_simplify(self.tauinf[svar] / self.q10)
                 del self.varinf[key]
                 del self.tauinf[key]
 
@@ -877,19 +1005,32 @@ class IonChannel(object):
         # substitution for common neuron names
         repl_pairs = [(str(c), str(c) + "i") for c in self.conc]
 
-        file.write("PROCEDURE rates(v%s) {\n" % concstring)
-        file.write("    %s = celsius\n" % str(self.sp_t))
+        assignment_lines = []
+        local_vars = []
+        temp_counter = 0
         for var, svar in zip(sv, self.ordered_statevars):
-            vi = sp.printing.ccode(self.varinf[svar], assign_to=f"{var}_inf")
-            ti = sp.printing.ccode(self.tauinf[svar], assign_to=f"tau_{var}")
+            vi_lines, temp_counter, vi_locals = _nmodl_assignment_lines(
+                f"{var}_inf", self.varinf[svar], temp_counter
+            )
+            ti_lines, temp_counter, ti_locals = _nmodl_assignment_lines(
+                f"tau_{var}", self.tauinf[svar], temp_counter
+            )
+            local_vars.extend(vi_locals)
+            local_vars.extend(ti_locals)
+            assignment_lines.extend(vi_lines)
+            assignment_lines.extend(ti_lines)
+
+        for ii, line in enumerate(assignment_lines):
             for repl_pair in repl_pairs:
-                vi = vi.replace(*repl_pair)
-                ti = ti.replace(*repl_pair)
-            # no ";" in mod-file, add indent
-            vi = vi.replace(";", "").replace("\n", "\n    ")
-            ti = ti.replace(";", "").replace("\n", "\n    ")
-            file.write(f"    {vi}\n")
-            file.write(f"    {ti}\n")
+                line = line.replace(*repl_pair)
+            assignment_lines[ii] = line
+
+        file.write("PROCEDURE rates(v%s) {\n" % concstring)
+        if local_vars:
+            file.write("    LOCAL %s\n" % ", ".join(dict.fromkeys(local_vars)))
+        file.write("    %s = celsius\n" % str(self.sp_t))
+        for line in assignment_lines:
+            file.write(f"    {line}\n")
         file.write("}\n\n")
 
         file.close()
