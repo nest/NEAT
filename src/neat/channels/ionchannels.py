@@ -180,6 +180,14 @@ def _nmodl_ccode(expr):
     return " ".join(sp.printing.ccode(expr).replace(";", "").split())
 
 
+def _nmodl_repl(text, repl_pairs):
+    """Apply identifier substitutions using word boundaries to avoid partial matches."""
+    import re
+    for old, new in repl_pairs:
+        text = re.sub(r'\b' + re.escape(old) + r'\b', new, text)
+    return text
+
+
 def _rebuild_sympy_expr(expr, args):
     try:
         return expr.func(*args, evaluate=False)
@@ -468,10 +476,15 @@ class IonChannel(object):
         # extract the state variables
         self.p_open = sp.sympify(self.p_open)
         self.statevars = self.p_open.free_symbols
-        # if voltage occurs directly in open probability,
-        # remove it from statevars
+        # remove v and any pre-declared concentration symbols from statevars
         if self.sp_v in self.statevars:
             self.statevars.remove(self.sp_v)
+        if hasattr(self, "conc"):
+            if hasattr(self.conc, "keys"):
+                conc_syms = {sp.symbols(str(k)) for k in self.conc.keys()}
+            else:
+                conc_syms = {sp.symbols(str(c)) for c in self.conc}
+            self.statevars -= conc_syms
 
         if not "tauinf" in self.__dict__:
             self.tauinf = {}
@@ -541,6 +554,12 @@ class IonChannel(object):
         # sympy concentration symbols
         self.sp_c = [ion for ion in self.conc]
 
+        # extracellular concentrations — fixed parameters substituted before lambdifying
+        if not hasattr(self, "conc_ext"):
+            self.conc_ext = {}
+        if not hasattr(self.conc_ext, "values"):
+            self.conc_ext = {str(ion): self.cfg.conc_ext[str(ion)] for ion in self.conc_ext}
+
         # default parameters
         self.default_params = SPDict({})
         self.default_params[str(self.sp_t)] = (
@@ -552,6 +571,12 @@ class IonChannel(object):
             )
         except KeyError:
             warnings.warn("No default reversal potential defined.")
+        for ion_str, val in self.conc_ext.items():
+            self.default_params[ion_str + "_ext"] = val
+
+        if not hasattr(self, "driving_force"):
+            self.driving_force = self.sp_v - sp.Symbol("e")
+        self.driving_force = sp.sympify(self.driving_force)
 
         # self._lambdify_channel()
         self.set_default_params(**kwargs)
@@ -566,7 +591,8 @@ class IonChannel(object):
         del d["f_varinf"]
         del d["f_tauinf"]
         del d["f_p_open"]
-        del d["dp_dx"], d["df_dv"], d["df_dx"], d["df_dc"]
+        del d["dp_dx"], d["df_dv"], d["df_dx"], d["df_dc"], d["dp_dv"], d["dp_dc"]
+        del d["f_driving_force"], d["dD_dv"], d["dD_dci"]
 
         return d
 
@@ -575,6 +601,9 @@ class IonChannel(object):
         since lambdified functions were not pickled we need to restore them
         """
         self.__dict__ = s
+        # backward-compat: states pickled before driving_force was introduced
+        if not hasattr(self, "driving_force"):
+            self.driving_force = self.sp_v - sp.Symbol("e")
         self._lambdify_channel()
 
     def set_default_params(self, **kwargs):
@@ -654,6 +683,26 @@ class IonChannel(object):
                     for c in self.sp_c
                 }
             )
+
+        # direct derivatives of p_open to voltage and concentrations
+        self.dp_dv = _broadcast(sp.lambdify(args, sp.diff(self.p_open, self.sp_v, 1)))
+        self.dp_dc = CallDict(
+            {
+                c: _broadcast(sp.lambdify(args, sp.diff(self.p_open, c, 1)))
+                for c in self.sp_c
+            }
+        )
+
+        # driving force D and its derivatives (temp, e, and <ion>_ext already substituted)
+        df_expr = self._substitute_defaults(self.driving_force)
+        self.f_driving_force = _broadcast(sp.lambdify(args, df_expr))
+        self.dD_dv = _broadcast(sp.lambdify(args, sp.diff(df_expr, self.sp_v, 1)))
+        self.dD_dci = CallDict(
+            {
+                c: _broadcast(sp.lambdify(args, sp.diff(df_expr, c, 1)))
+                for c in self.sp_c
+            }
+        )
 
     def _args_as_list(self, v, w_statevar=True, **kwargs):
         """
@@ -841,16 +890,15 @@ class IonChannel(object):
             the dimensions of `v`.
         """
         dp_dx, df_dv, df_dx = self.compute_derivatives(v, **kwargs)
+        args = self._args_as_list(v, **kwargs)
 
-        # determine the output shape according to numpy broadcasting rules
-        args_aux = [freqs] + self._args_as_list(v, **kwargs)
-        out_shape = np.broadcast(*args_aux).shape
-
+        out_shape = np.broadcast(*([freqs] + args)).shape
         lin_f = np.zeros(out_shape, dtype=np.array(freqs).dtype)
+        # direct voltage coupling (frequency-independent)
+        lin_f += self.dp_dv(*args)
         for svar, dp_dx_ in dp_dx.items():
             df_dv_ = df_dv[svar] * 1e3  # convert to 1 / s
             df_dx_ = df_dx[svar] * 1e3  # convert to 1 / s
-            # add to the impedance contribution
             lin_f += dp_dx_ * df_dv_ / (freqs - df_dx_)
         return lin_f
 
@@ -878,16 +926,17 @@ class IonChannel(object):
         """
         dp_dx, df_dv, df_dx = self.compute_derivatives(v, **kwargs)
         df_dc = self.compute_derivativesConc(v, **kwargs)
+        args = self._args_as_list(v, **kwargs)
 
-        # determine the output shape according to numpy broadcasting rules
-        args_aux = [freqs] + self._args_as_list(v, **kwargs)
-        out_shape = np.broadcast(*args_aux).shape
-
+        out_shape = np.broadcast(*([freqs] + args)).shape
         lin_f = np.zeros(out_shape, dtype=np.array(freqs).dtype)
+        # direct concentration coupling (frequency-independent)
+        dp_dc_direct = self.dp_dc(*args)
+        if ion in dp_dc_direct:
+            lin_f += dp_dc_direct[ion]
         for svar, dp_dx_ in dp_dx.items():
             df_dc_ = df_dc[svar][ion] * 1e3  # convert to 1 / s
             df_dx_ = df_dx[svar] * 1e3  # convert to 1 / s
-            # add to the impedance contribution
             lin_f += dp_dx_ * df_dc_ / (freqs - df_dx_)
         return lin_f
 
@@ -911,8 +960,9 @@ class IonChannel(object):
         freqs: float, complex, or `np.ndarray` of float or complex:
             The frequencies ``[Hz]`` at which to evaluate the linearized contribution
         e: float or `None`
-            The reversal potential of the channel. Defaults to the value stored
-            in `self.default_params['e']` if not provided.
+            Accepted for backward compatibility; ignored. The reversal potential
+            (or full GHK driving force) is embedded in `self.driving_force` and
+            substituted before lambdifying.
         **kwargs: float or `np.ndarray`
             Optional values for the state variables and concentrations.
 
@@ -922,10 +972,10 @@ class IonChannel(object):
             The linearized current. Shape is dimension of `freqs` followed by
             the dimensions of `v`.
         """
-        e = self._get_reversal(e)
-        return (e - v) * self.compute_linear(v, freqs, **kwargs) - self.compute_p_open(
-            v, **kwargs
-        )
+        args = self._args_as_list(v, **kwargs)
+        D = self.f_driving_force(*args)
+        dD_dv = self.dD_dv(*args)
+        return -D * self.compute_linear(v, freqs, **kwargs) - self.compute_p_open(v, **kwargs) * dD_dv
 
     def compute_lin_conc(self, v, freqs, ion, e=None, **kwargs):
         """
@@ -940,8 +990,7 @@ class IonChannel(object):
         ion: str
             The ion name for which to compute the linearized contribution
         e: float or `None`
-            The reversal potential of the channel. Defaults to the value stored
-            in `self.default_params['e']` if not provided.
+            Accepted for backward compatibility; ignored. See `compute_lin_sum`.
         **kwargs: float or `np.ndarray`
             Optional values for the state variables and concentrations.
 
@@ -951,8 +1000,11 @@ class IonChannel(object):
             The linearized current. Shape is dimension of `freqs` followed by
             the dimensions of `v`.
         """
-        e = self._get_reversal(e)
-        return (e - v) * self.compute_linear_conc(v, freqs, ion, **kwargs)
+        args = self._args_as_list(v, **kwargs)
+        D = self.f_driving_force(*args)
+        dD_dci_ion = self.dD_dci(*args).get(ion, 0.0)
+        p = self.compute_p_open(v, **kwargs)
+        return -D * self.compute_linear_conc(v, freqs, ion, **kwargs) - p * dD_dci_ion
 
     def write_mod_file(self, path, g=0.0, e=None):
         """
@@ -976,11 +1028,27 @@ class IonChannel(object):
         file.write("NEURON {\n")
         file.write("    SUFFIX I%s\n" % cname)
         if self.ion == "":
-            file.write("    NONSPECIFIC_CURRENT i" + "\n")
+            file.write("    NONSPECIFIC_CURRENT i\n")
+        elif self.ion in cs:
+            # ion is both written and read: merge into one USEION line
+            reads = [self.ion + "i"]
+            if self.ion in self.conc_ext:
+                reads.append(self.ion + "o")
+            file.write("    USEION %s READ %s WRITE i%s\n" % (self.ion, ", ".join(reads), self.ion))
         else:
-            file.write("    USEION %s WRITE i%s\n" % (self.ion, self.ion))
+            reads = []
+            if self.ion in self.conc_ext:
+                reads.append(self.ion + "o")
+            if reads:
+                file.write("    USEION %s READ %s WRITE i%s\n" % (self.ion, ", ".join(reads), self.ion))
+            else:
+                file.write("    USEION %s WRITE i%s\n" % (self.ion, self.ion))
         for c in cs:
-            file.write("    USEION %s READ %si\n" % (c, c))
+            if c != self.ion:
+                reads = [c + "i"]
+                if c in self.conc_ext:
+                    reads.append(c + "o")
+                file.write("    USEION %s READ %s\n" % (c, ", ".join(reads)))
         file.write("    RANGE  g, e" + "\n")
 
         taustring = "tau_" + ", tau_".join(sv)
@@ -1008,6 +1076,8 @@ class IonChannel(object):
             file.write("    tau_%s (ms) \n" % var)
         for ion in cs:
             file.write("    " + ion + "i (mM)" + "\n")
+        for ion_str in self.conc_ext:
+            file.write("    " + ion_str + "o (mM)" + "\n")
         file.write("    v (mV)" + "\n")
         file.write("    %s (degC)\n" % (self.sp_t))
         file.write("}\n\n")
@@ -1017,20 +1087,40 @@ class IonChannel(object):
             file.write("    %s\n" % var)
         file.write("}\n\n")
 
-        calcstring = "i%s = g * (%s) * (v - e)" % (
-            self.ion,
-            sp.printing.ccode(self.p_open),
-        )
+        # substitution for common neuron names (ca_ext → cao, ca → cai, etc.)
+        # ext replacements must come first so "ca" doesn't partially match "ca_ext"
+        repl_pairs = [(str(ion) + "_ext", str(ion) + "o") for ion in self.conc_ext]
+        repl_pairs += [(str(c), str(c) + "i") for c in self.conc]
+
+        calc_p_open = _nmodl_repl(sp.printing.ccode(self.p_open), repl_pairs)
+
+        # driving force: ohmic uses inline (v-e); non-ohmic gets its own FUNCTION block
+        # (LOCAL declarations are only valid inside FUNCTION/PROCEDURE, not BREAKPOINT)
+        ohmic_df = self.sp_v - sp.Symbol("e")
+        if self.driving_force == ohmic_df:
+            calcstring = "i%s = g * (%s) * (v - e)" % (self.ion, calc_p_open)
+        else:
+            # substitute temp → celsius so the FUNCTION uses the NEURON builtin directly
+            df_expr = self.driving_force.subs(self.sp_t, sp.Symbol("celsius"))
+            df_lines, _, df_locals = _nmodl_assignment_lines("df", df_expr, 0)
+            df_locals = list(dict.fromkeys(df_locals + ["df"]))
+            df_lines = [_nmodl_repl(line, repl_pairs) for line in df_lines]
+            calcstring = "i%s = g * (%s) * nmodl_df()" % (self.ion, calc_p_open)
+
+            file.write("FUNCTION nmodl_df() {\n")
+            file.write("    LOCAL %s\n" % ", ".join(df_locals))
+            for line in df_lines:
+                file.write(f"    {line}\n")
+            file.write("    nmodl_df = df\n")
+            file.write("}\n\n")
 
         file.write("BREAKPOINT {\n")
         file.write("    SOLVE states METHOD cnexp" + "\n")
         file.write("    %s\n" % calcstring)
         file.write("}\n\n")
 
-        concstring = "i, ".join(cs)
-        if len(cs) > 0:
-            concstring = ", " + concstring
-            concstring += "i"
+        conc_args = [str(c) + "i" for c in cs] + [str(ion) + "o" for ion in self.conc_ext]
+        concstring = (", " + ", ".join(conc_args)) if conc_args else ""
 
         file.write("INITIAL {\n")
         file.write("    rates(v%s)\n" % concstring)
@@ -1043,9 +1133,6 @@ class IonChannel(object):
         for var in sv:
             file.write("    %s' = (%s_inf - %s) /  tau_%s \n" % (var, var, var, var))
         file.write("}\n\n")
-
-        # substitution for common neuron names
-        repl_pairs = [(str(c), str(c) + "i") for c in self.conc]
 
         assignment_lines = []
         local_vars = []
@@ -1062,10 +1149,7 @@ class IonChannel(object):
             assignment_lines.extend(vi_lines)
             assignment_lines.extend(ti_lines)
 
-        for ii, line in enumerate(assignment_lines):
-            for repl_pair in repl_pairs:
-                line = line.replace(*repl_pair)
-            assignment_lines[ii] = line
+        assignment_lines = [_nmodl_repl(line, repl_pairs) for line in assignment_lines]
 
         file.write("PROCEDURE rates(v%s) {\n" % concstring)
         if local_vars:

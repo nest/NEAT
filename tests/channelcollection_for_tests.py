@@ -24,6 +24,24 @@ import sympy as sp
 from neat.channels.ionchannels import IonChannel
 
 
+def ghk_expr(ion: str) -> sp.Expr:
+    """
+    GHK driving force as a sympy expression, for use in IonChannel.driving_force.
+
+    Symbols: v (mV), <ion> (intracellular mM), <ion>_ext (extracellular mM),
+    temp (degC). The _ext and temp symbols are substituted numerically by
+    IonChannel._substitute_defaults before lambdifying.
+    """
+    v, temp = sp.symbols("v temp")
+    ci = sp.symbols(ion)
+    co = sp.symbols(ion + "_ext")
+    KTF = (25 / 293.15) * (temp + 273.15)
+    f = KTF / 2
+    z = v / f
+    efun = sp.Piecewise((1 - z / 2, sp.Abs(z) < 1e-4), (z / (sp.exp(z) - 1), True))
+    return -f * (1 - (ci / co) * sp.exp(z)) * efun
+
+
 def vtrap(x, y):
     """
     Function to stabelize limit cases of 0/0 that occur in certain channel
@@ -312,3 +330,16 @@ class VoltDepChan(IonChannel):
         self.varinf = {"m": "1 / (1 + exp(-(v + 30) / 10))"}
         self.tauinf = {"m": "1."}
         self.e = -23.0
+
+
+class GHKChan(IonChannel):
+    """Toy GHK channel: p_open = m, driving force = GHK(ca)."""
+
+    def define(self):
+        self.ion = "ca"
+        self.conc = ["ca"]
+        self.conc_ext = ["ca"]
+        self.p_open = "m"
+        self.driving_force = ghk_expr("ca")
+        self.varinf = {"m": "1 / (1 + exp(-(v + 30) / 10))"}
+        self.tauinf = {"m": "1."}

@@ -230,7 +230,6 @@ class TestDirectDependencies:
 
     # --- concentration in p_open ---
 
-    @pytest.mark.xfail(reason="ca in p_open is mis-classified as a state variable")
     def test_conc_dep_statevars(self):
         """ca declared in self.conc must not appear in statevars even when in p_open."""
         ch = channelcollection.ConcDepChan()
@@ -238,7 +237,6 @@ class TestDirectDependencies:
         assert sp.symbols("ca") not in ch.statevars
         assert len(ch.statevars) == 1
 
-    @pytest.mark.xfail(reason="direct dp/dc term not yet included in compute_linear_conc")
     def test_conc_dep_linearization_dc(self):
         """At DC, compute_lin_conc must match d/d_ca[(e-v)*p_ss] via finite difference."""
         ch = channelcollection.ConcDepChan()
@@ -254,7 +252,6 @@ class TestDirectDependencies:
         neat_val = ch.compute_lin_conc(v0, 0.0, "ca", e=e)
         assert np.allclose(neat_val, fd, rtol=1e-4)
 
-    @pytest.mark.xfail(reason="USEION deduplication in write_mod_file not yet implemented")
     def test_conc_dep_mod_file(self, tmp_path):
         """MOD file must emit exactly one 'USEION ca READ cai WRITE ica' line."""
         ch = channelcollection.ConcDepChan()
@@ -274,7 +271,6 @@ class TestDirectDependencies:
         assert sp.symbols("v") not in ch.statevars
         assert len(ch.statevars) == 1
 
-    @pytest.mark.xfail(reason="direct dp/dv term not yet included in compute_linear")
     def test_volt_dep_linearization_dc(self):
         """At DC, compute_lin_sum must match d/dv[(e-v)*p_ss] via finite difference."""
         ch = channelcollection.VoltDepChan()
@@ -303,6 +299,100 @@ class TestDirectDependencies:
         assert sp.symbols("ca") not in sk.statevars
         assert sp.symbols("z") in sk.statevars
         assert len(sk.statevars) == 1
+
+
+def _ghk_D(v, cai, cao, temp):
+    """Numerical GHK driving force matching ghk_expr."""
+    KTF = (25 / 293.15) * (temp + 273.15)
+    f = KTF / 2
+    z = v / f
+    efun = 1 - z / 2 if abs(z) < 1e-4 else z / (np.exp(z) - 1)
+    return -f * (1 - (cai / cao) * np.exp(z)) * efun
+
+
+class TestGHKDrivingForce:
+    """
+    Tests for GHK driving-force support (Step 2–5 of IonChannel_ghk_extension_TODO.md).
+
+    Tests marked xfail describe the target behaviour and are expected to fail until
+    IonChannel is updated with driving_force / conc_ext / f_driving_force support.
+    """
+
+    def test_ghk_statevars(self):
+        """ca must not be in statevars; ca_ext must not appear in lambda arg lists."""
+        ch = channelcollection.GHKChan()
+        assert sp.symbols("m") in ch.statevars
+        assert sp.symbols("ca") not in ch.statevars
+        assert sp.symbols("ca_ext") not in ch.statevars
+        # ca_ext is substituted numerically — it must not end up in sp_c
+        assert sp.symbols("ca_ext") not in [sp.symbols(str(c)) for c in ch.sp_c]
+
+    def test_ghk_linearization_voltage_dc(self):
+        """At DC, compute_lin_sum must match -d/dv[p_ss(v)*D(v,cai0,cao0)] via FD."""
+        from neat.factorydefaults import DefaultPhysiology
+
+        ch = channelcollection.GHKChan()
+        cfg = DefaultPhysiology()
+        v0 = -40.0
+        cai0 = ch.conc[sp.symbols("ca")]
+        cao0 = cfg.conc_ext["ca"]
+        temp = cfg.temp
+
+        def p_ss(v):
+            return 1.0 / (1.0 + np.exp(-(v + 30.0) / 10.0))
+
+        dv = 1e-5
+        fd = -(
+            p_ss(v0 + dv) * _ghk_D(v0 + dv, cai0, cao0, temp)
+            - p_ss(v0 - dv) * _ghk_D(v0 - dv, cai0, cao0, temp)
+        ) / (2 * dv)
+        neat_val = ch.compute_lin_sum(v0, 0.0)
+        assert np.allclose(neat_val, fd, rtol=1e-4)
+
+    def test_ghk_linearization_conc_int_dc(self):
+        """At DC, compute_lin_conc('ca') must match -d/d_cai[p_ss*D(v,cai,cao0)] via FD."""
+        from neat.factorydefaults import DefaultPhysiology
+
+        ch = channelcollection.GHKChan()
+        cfg = DefaultPhysiology()
+        v0 = -40.0
+        cai0 = ch.conc[sp.symbols("ca")]
+        cao0 = cfg.conc_ext["ca"]
+        temp = cfg.temp
+
+        def p_ss(v):
+            return 1.0 / (1.0 + np.exp(-(v + 30.0) / 10.0))
+
+        dca = cai0 * 1e-5
+        fd = (
+            -p_ss(v0)
+            * (_ghk_D(v0, cai0 + dca, cao0, temp) - _ghk_D(v0, cai0 - dca, cao0, temp))
+            / (2 * dca)
+        )
+        neat_val = ch.compute_lin_conc(v0, 0.0, "ca")
+        assert np.allclose(neat_val, fd, rtol=1e-4)
+
+    def test_ghk_mod_file(self, tmp_path):
+        """MOD must have 'USEION ca READ cai, cao WRITE ica' and no 'ca_ext' in output."""
+        ch = channelcollection.GHKChan()
+        ch.write_mod_file(str(tmp_path))
+        text = (tmp_path / "IGHKChan.mod").read_text()
+        useion_lines = [l.strip() for l in text.splitlines() if "USEION ca" in l]
+        assert len(useion_lines) == 1
+        assert "cai" in useion_lines[0]
+        assert "cao" in useion_lines[0]
+        assert "WRITE ica" in useion_lines[0]
+        assert "ca_ext" not in text
+
+    def test_ohmic_regression(self):
+        """Na_Ta and SK give identical outputs regardless of GHK driving-force layer."""
+        na = channelcollection.Na_Ta()
+        assert np.allclose(na.compute_p_open(-35.0), 0.002009216860105564)
+        assert np.allclose(na.compute_lin_sum(-35.0, 0.0, 50.0), -0.00534261017220376)
+
+        sk = channelcollection.SK()
+        assert sp.symbols("z") in sk.statevars
+        assert sp.symbols("ca") not in sk.statevars
 
 
 if __name__ == "__main__":
