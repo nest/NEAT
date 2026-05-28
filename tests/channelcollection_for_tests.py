@@ -280,3 +280,35 @@ class SK_E2(IonChannel):
             )
         }
         self.tauinf = {"z": "1."}  # ms
+
+
+class ConcDepChan(IonChannel):
+    """
+    Toy channel with a concentration appearing directly in p_open (not only via state-variable
+    kinetics). p_open = m / (1 + ca), where ca is intracellular calcium.
+
+    Used to test first-class support for direct concentration dependencies in p_open.
+    """
+
+    def define(self):
+        self.ion = "ca"
+        self.conc = ["ca"]
+        self.p_open = "m / (1 + ca)"
+        self.varinf = {"m": "1 / (1 + exp(-(v + 30) / 10))"}
+        self.tauinf = {"m": "1."}
+        self.e = 50.0
+
+
+class VoltDepChan(IonChannel):
+    """
+    Toy channel with voltage appearing directly in p_open (not only through state-variable
+    kinetics). p_open = m / (1 + exp(-v / 10)).
+
+    Used to test first-class support for direct voltage dependencies in p_open.
+    """
+
+    def define(self):
+        self.p_open = "m / (1 + exp(-v / 10))"
+        self.varinf = {"m": "1 / (1 + exp(-(v + 30) / 10))"}
+        self.tauinf = {"m": "1."}
+        self.e = -23.0
