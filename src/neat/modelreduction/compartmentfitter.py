@@ -38,7 +38,11 @@ import pathlib
 import warnings
 
 
-def _statevar_is_activating(f_statevar):
+def _default_conc_args(channel):
+    return [channel.conc[c] for c in channel.sp_c]
+
+
+def _statevar_is_activating(f_statevar, *args):
     """
     check whether a statevar is activating or inactivating
 
@@ -51,7 +55,7 @@ def _statevar_is_activating(f_statevar):
     # inactivating
     v_test = np.array([-43.22, -32.22])
 
-    sv_test = f_statevar(v_test)
+    sv_test = f_statevar(v_test, *args)
     return sv_test[0] < sv_test[1]
 
 
@@ -94,6 +98,8 @@ def get_expansion_points(e_hs, channel, only_e_h=False):
     sv_hs: dict
         the expansion points at every holding potential
     """
+    conc_args = _default_conc_args(channel)
+
     if len(channel.statevars) == 1 or only_e_h:
         sv_hs = channel.compute_varinf(e_hs)
         sv_hs["v"] = e_hs
@@ -104,10 +110,13 @@ def get_expansion_points(e_hs, channel, only_e_h=False):
         sv_hs = SPDict(v=e_hs_aux_act)
         for svar, f_inf in channel.f_varinf.items():
             # check if variable is activation
-            if _statevar_is_activating(f_inf):  # variable is activation
-                sv_hs[str(svar)] = f_inf(e_hs_aux_act)
+            if _statevar_is_activating(f_inf, *conc_args):  # variable is activation
+                sv_hs[str(svar)] = f_inf(e_hs_aux_act, *conc_args)
             else:  # variable is inactivation
-                sv_hs[str(svar)] = f_inf(e_hs_aux_inact)
+                sv_hs[str(svar)] = f_inf(e_hs_aux_inact, *conc_args)
+
+    for ion, conc in channel.conc.items():
+        sv_hs[str(ion)] = np.full_like(sv_hs["v"], conc, dtype=float)
 
     return sv_hs
 
@@ -455,6 +464,13 @@ class CompartmentFitter(EquilibriumTree):
                     str(svar): sv_h[svar][ii]
                     for svar in channel.statevars
                     if str(svar) != "v"
+                }
+            )
+            sv.update(
+                {
+                    str(ion): sv_h[ion][ii]
+                    for ion in channel.conc
+                    if str(ion) in sv_h
                 }
             )
 

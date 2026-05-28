@@ -31,6 +31,7 @@ from neat import (
     GreensTree,
     SOVTree,
     NeuronCompartmentTree,
+    IonChannel,
     check_for_coreneuron,
 )
 from neat import CompartmentFitter, CachedGreensTree
@@ -49,6 +50,18 @@ SKIP_ACTIVE_MECHS_WITH_CORENEURON = pytest.mark.skipif(
     check_for_coreneuron(),
     reason="Active mechanism tests are skipped when running with CoreNEURON",
 )
+
+
+class TwoVarConcDepChan(IonChannel):
+    def define(self):
+        self.conc = ["ca"]
+        self.p_open = "m * h"
+        self.varinf = {
+            "m": "1 / (1 + exp(-(v + 30) / (10 + 1000 * ca)))",
+            "h": "1 / (1 + exp((v + 45) / 10))",
+        }
+        self.tauinf = {"m": "1.", "h": "2."}
+        self.e = -23.0
 
 
 class TestCompartmentFitter:
@@ -836,6 +849,8 @@ class TestCompartmentFitter:
 def test_expansion_points():
     kv3_1 = channelcollection.Kv3_1()
     na_ta = channelcollection.Na_Ta()
+    conc_dep = channelcollection.ConcDepChan()
+    two_var_conc_dep = TwoVarConcDepChan()
 
     e_hs = np.array([-75.0, -15.0])
 
@@ -854,6 +869,81 @@ def test_expansion_points():
     assert np.allclose(na_ta.f_varinf["h"](v_inact), sv_hs["h"])
     assert not np.allclose(na_ta.f_varinf["h"](v_act), sv_hs["h"])
     assert np.allclose(v_act, sv_hs["v"])
+
+    # test expansion point concentration defaults for channels with direct
+    # concentration dependencies in p_open
+    sv_hs = compartmentfitter.get_expansion_points(e_hs, conc_dep)
+    ca_default = conc_dep.conc["ca"]
+    assert np.allclose(conc_dep.compute_varinf(e_hs)["m"], sv_hs["m"])
+    assert np.allclose(sv_hs["v"], e_hs)
+    assert np.allclose(sv_hs["ca"], np.full_like(e_hs, ca_default, dtype=float))
+
+    # test concentration-aware activation/inactivation classification for
+    # two-state-variable channels
+    sv_hs = compartmentfitter.get_expansion_points(e_hs, two_var_conc_dep)
+    ca_default = two_var_conc_dep.conc["ca"]
+    ca_args = np.full_like(v_act, ca_default, dtype=float)
+    assert np.allclose(two_var_conc_dep.f_varinf["m"](v_act, ca_args), sv_hs["m"])
+    assert np.allclose(
+        two_var_conc_dep.f_varinf["h"](v_inact, ca_args), sv_hs["h"]
+    )
+    assert np.allclose(sv_hs["ca"], np.full_like(v_act, ca_default, dtype=float))
+
+
+def test_eval_channel_passes_concentration_expansion_points():
+    channel = channelcollection.ConcDepChan()
+    seen_p_open_kwargs = []
+    orig_compute_p_open = channel.compute_p_open
+
+    def compute_p_open(v, **kwargs):
+        seen_p_open_kwargs.append(kwargs.copy())
+        assert "ca" in kwargs
+        return orig_compute_p_open(v, **kwargs)
+
+    channel.compute_p_open = compute_p_open
+
+    class FakeFitTree:
+        def __init__(self):
+            self.sv_h = None
+
+        def set_impedances_in_tree(self, freqs=None, sv_h=None, pprint=False):
+            self.sv_h = sv_h
+
+        def calc_impedance_matrix(self, locs):
+            n_exp = len(self.sv_h["ConcDepChan"]["v"])
+            return np.zeros((n_exp, 1, 1), dtype=float)
+
+    class FakeCTree:
+        def __init__(self):
+            self.svs = []
+
+        def compute_g_single_channel(self, *args, sv=None, **kwargs):
+            self.svs.append(dict(sv))
+            assert "ca" in sv
+            return np.zeros((1, 1), dtype=float), np.zeros(1, dtype=float)
+
+        def _fit_res_action(self, action, *args, **kwargs):
+            return None
+
+        def run_fit(self):
+            return None
+
+    cfit = object.__new__(CompartmentFitter)
+    cfit.channel_storage = {"ConcDepChan": channel}
+    cfit.fit_cfg = type(
+        "FitCfg", (), {"e_hs": np.array([-75.0, -15.0]), "freqs": 0.0}
+    )()
+
+    fake_ctree = FakeCTree()
+    fake_fit_tree = FakeFitTree()
+    cfit.convert_fit_arg = lambda fit_arg: (fake_ctree, [])
+    cfit.create_tree_gf = lambda *args, **kwargs: fake_fit_tree
+
+    cfit._eval_channel("test fit", "ConcDepChan")
+
+    assert len(fake_ctree.svs) == len(cfit.fit_cfg.e_hs)
+    assert all("ca" in sv for sv in fake_ctree.svs)
+    assert len(seen_p_open_kwargs) == len(cfit.fit_cfg.e_hs)
 
 
 if __name__ == "__main__":
