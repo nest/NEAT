@@ -297,6 +297,48 @@ def _nmodl_assignment_lines(lhs, expr, temp_counter=0):
     return lines, temp_counter, locals_
 
 
+def _nestml_ccode(expr):
+    return _nmodl_ccode(expr).replace("fabs(", "abs(").replace("fmax(", "max(").replace("fmin(", "min(")
+
+
+def _piecewise_to_nestml_expr(expr):
+    expr = sp.sympify(expr)
+
+    if isinstance(expr, sp.Piecewise):
+        if len(expr.args) == 2 and (expr.args[1][1] == True or expr.args[1][1] == sp.true):
+            value_if, condition = expr.args[0]
+            value_else, _ = expr.args[1]
+            value_if = _piecewise_to_nestml_expr(value_if)
+            value_else = _piecewise_to_nestml_expr(value_else)
+
+            if getattr(condition, "rel_op", None) == "<":
+                if value_if == condition.rhs and value_else == condition.lhs:
+                    return sp.Max(value_else, value_if, evaluate=False)
+            if getattr(condition, "rel_op", None) == ">":
+                # vtrap-style singularity guards are not representable without
+                # function-local control flow in the current NESTML generator.
+                return value_if
+
+        return _piecewise_to_nestml_expr(expr.args[0][0])
+
+    if not expr.args:
+        return expr
+
+    new_args = [_piecewise_to_nestml_expr(arg) for arg in expr.args]
+    if any(new_arg != old_arg for new_arg, old_arg in zip(new_args, expr.args)):
+        return _rebuild_sympy_expr(expr, new_args)
+    return expr
+
+
+def _nestml_function_assignment(lhs, expr):
+    expr = _piecewise_to_nestml_expr(expr)
+    return f"        {lhs} = {_nestml_ccode(expr)}\n"
+
+
+def _needs_nestml_piecewise_lowering(expr):
+    return sp.sympify(expr).has(sp.Piecewise)
+
+
 class IonChannel(object):
     """
     Base ion channel class that implements linearization and code generation for
@@ -1124,7 +1166,7 @@ class IonChannel(object):
             for svar, sv_ in zip(self.ordered_statevars, sv_suff):
                 p_open_ = p_open_.subs(svar, sp.symbols(sv_))
                 p_open_ = p_open_.subs(
-                    self.sp_v, sp.UnevaluatedExpr(sp.symbols("v_comp"))
+                    self.sp_v, sp.symbols("v_comp", real=True)
                 )
 
             eq_str = (
@@ -1158,17 +1200,24 @@ class IonChannel(object):
                 #     varinf_func = varinf_func.subs(ckey, cval)
                 # print activation function to nestml file
                 varinf_func = varinf_func.subs(
-                    svar, sp.UnevaluatedExpr(sp.symbols(sv_suff_))
+                    svar, sp.symbols(sv_suff_, real=True)
                 )
                 varinf_func = varinf_func.subs(
-                    self.sp_v, sp.UnevaluatedExpr(sp.symbols("v_comp"))
+                    self.sp_v, sp.symbols("v_comp", real=True)
                 )
 
-                code_str = sp.pycode(varinf_func, fully_qualified_modules=False)
+                if _needs_nestml_piecewise_lowering(varinf_func):
+                    value_str = _nestml_function_assignment('val', varinf_func)
+                else:
+                    code_str = sp.pycode(varinf_func, fully_qualified_modules=False)
+                    value_str = self._create_nestml_funcstr(
+                        code_str, n_spaces=4, indent=8
+                    )
+
                 func_str += (
                     f"    function {sv_}_inf_{cname} ({func_call_args}) real:\n"
                     f"        val real\n"
-                    f"{self._create_nestml_funcstr(code_str, n_spaces=4, indent=8)}"
+                    f"{value_str}"
                     f"        return val\n\n"
                 )
 
@@ -1178,17 +1227,24 @@ class IonChannel(object):
                     tauinf_func = tauinf_func.subs(ckey, cval)
 
                 tauinf_func = tauinf_func.subs(
-                    svar, sp.UnevaluatedExpr(sp.symbols(sv_suff_))
+                    svar, sp.symbols(sv_suff_, real=True)
                 )
                 tauinf_func = tauinf_func.subs(
-                    self.sp_v, sp.UnevaluatedExpr(sp.symbols("v_comp"))
+                    self.sp_v, sp.symbols("v_comp", real=True)
                 )
 
-                code_str = sp.pycode(tauinf_func, fully_qualified_modules=False)
+                if _needs_nestml_piecewise_lowering(tauinf_func):
+                    value_str = _nestml_function_assignment('val', tauinf_func)
+                else:
+                    code_str = sp.pycode(tauinf_func, fully_qualified_modules=False)
+                    value_str = self._create_nestml_funcstr(
+                        code_str, n_spaces=4, indent=8
+                    )
+
                 func_str += (
                     f"\n    function tau_{sv_}_{cname} ({func_call_args}) real:\n"
                     f"        val real\n"
-                    f"{self._create_nestml_funcstr(code_str, n_spaces=4, indent=8)}"
+                    f"{value_str}"
                     f"        return val\n\n"
                 )
 
