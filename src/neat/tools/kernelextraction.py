@@ -1959,6 +1959,7 @@ class FourierTools:
             constrained=True,
             reduce_numexp=False,
         )
+
         zk = Kernel({"a": alpha * 1e-3, "c": gamma * 1e-3})
         if compute_time_derivative:
             dzk_dt = zk.diff()

@@ -238,6 +238,24 @@ class Brian2CompartmentTree(CompartmentTree):
         self, arg=None, channel_storage: Optional[Dict[str, "IonChannel"]] = None
     ):
         super().__init__(arg)
+
+        # Admittance-kernel correction dummy compartments (loc_idx is None)
+        # cannot be realized as Brian2 ``Cylinder`` sections: they have
+        # `g_l = 0` and the fake-geometry solve can produce non-physical
+        # (negative) radii / lengths for them. The correction is only
+        # meaningful for the NEST / analytic models, so we drop the dummy
+        # compartments here (``self`` is a copy of the input tree, so the
+        # caller's tree is left untouched).
+        if self.has_correction_compartments():
+            warnings.warn(
+                "The compartment tree contains admittance-kernel correction "
+                "dummy compartments (loc_idx is None), which cannot be "
+                "represented in Brian2. They are ignored when building the "
+                "`Brian2CompartmentTree`.",
+                UserWarning,
+            )
+            self.remove_correction_compartments()
+
         self._channel_storage = channel_storage or getattr(self, "channel_storage", {})
 
         # auxiliary constants for fake geometry calculation

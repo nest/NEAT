@@ -34,7 +34,7 @@ except ImportError as e:
 
 from neat import PhysTree
 from neat import CompartmentNode, CompartmentTree
-from neat import CompartmentFitter, NeuronCompartmentTree
+from neat import CompartmentFitter, NeuronCompartmentTree, NeuronSimTree
 from neat import NestCompartmentNode, NestCompartmentTree, load_nest_model
 
 import channelcollection_for_tests as channelcollection
@@ -308,9 +308,12 @@ class TestNest:
             ax.plot(res_nest["times"], res_nest["v_comp2"], "bo--")
             pl.show()
 
-    def load_T_tree(self):
+    def _build_T_phystree(self):
         """
-        Parameters taken from a BBP SST model for a subset of ion channels
+        Build the T-tree `neat.PhysTree` morphology with a subset of ion
+        channels at the soma (parameters taken from a BBP SST model). A fresh
+        tree is returned on every call so that independent fits do not share
+        (and mutate) the same underlying morphology.
         """
         tree = PhysTree(
             os.path.join(MORPHOLOGIES_PATH_PREFIX, "Ttree_segments.swc"),
@@ -332,10 +335,20 @@ class TestNest:
         # passive leak current
         tree.fit_leak_current(-70.0, 15.0)
 
+        return tree
+
+    def load_T_tree(self, fit_locs=None, kernel_correction=None):
+        """
+        Parameters taken from a BBP SST model for a subset of ion channels
+        """
+        tree = self._build_T_phystree()
+        self.tree = tree
+
         # simplify
-        locs = [(n.index, 0.5) for n in tree]
+        if fit_locs is None:
+            fit_locs = [(n.index, 0.5) for n in tree]
         cfit = CompartmentFitter(tree, save_cache=False, recompute_cache=True)
-        self.ctree, _ = cfit.fit_model(locs)
+        self.ctree, _ = cfit.fit_model(fit_locs, kernel_correction=kernel_correction)
 
     def test_dend_nest_neuron_comparison(self, pplot=False):
         dt = 0.01
@@ -493,11 +506,150 @@ class TestNest:
             ax.plot(res_nest["times"], res_nest[f"h_NaTa_t{dend_idx}"], "g--", lw=2)
             pl.show()
 
+    def _simulate_nest_dc_step(self, ctree, amp, delay, dur, cal, dt, tmax):
+        """
+        Inject a somatic DC current step into a NEST reduction of `ctree`
+        and return the somatic voltage trace (time aligned so that ``t = 0``
+        is the end of the calibration window).
+        """
+        idx0 = int(cal / dt)
+
+        nest.ResetKernel()
+        channel_installer.load_or_install_nest_test_channels()
+        nest.SetKernelStatus(dict(resolution=dt))
+
+        csimtree_nest = NestCompartmentTree(ctree)
+        nestmodel = csimtree_nest.init_model("multichannel_test", 1)
+        # somatic current input port
+        nestmodel.receptors = [
+            {"comp_idx": 0, "receptor_type": "curr_in"},
+        ]
+        # somatic DC current step
+        dcg = nest.Create(
+            "step_current_generator",
+            {
+                "amplitude_times": [cal + dt, cal + delay, cal + delay + dur],
+                "amplitude_values": [0.0, amp, 0.0],
+            },
+        )
+        nest.Connect(
+            dcg,
+            nestmodel,
+            syn_spec={
+                "synapse_model": "static_synapse",
+                "weight": 1.0,
+                "delay": dt,
+                "receptor_type": 0,
+            },
+        )
+        # somatic voltage recording
+        mm = nest.Create("multimeter", 1, {"record_from": ["v_comp0"], "interval": dt})
+        nest.Connect(mm, nestmodel)
+
+        nest.Simulate(cal + tmax)
+        res_nest = nest.GetStatus(mm, "events")[0]
+
+        times = res_nest["times"][idx0:] - res_nest["times"][idx0]
+        v_comp0 = res_nest["v_comp0"][idx0:]
+
+        return times, v_comp0
+
+    def test_admittance_correction_dc_step(self, pplot=False):
+        """
+        Compare the somatic voltage response to a DC current step between
+
+          (i)   the full T morphology simulated in NEURON,
+          (ii)  a NEST reduction with only the somatic compartment, and
+          (iii) a NEST reduction with only the somatic compartment plus an
+                admittance-kernel correction.
+
+        The admittance correction adds passive dummy compartments that
+        reproduce the (frequency-dependent) load of the missing dendrites,
+        so the corrected reduction (iii) should track the full model (i)
+        more closely than the uncorrected reduction (ii).
+        """
+        dt = 0.025
+        cal = 200.0  # calibration / settling time [ms]
+        delay = 50.0  # step onset after calibration [ms]
+        dur = 20.0  # step duration [ms]
+        tmax = delay + dur + 100.0  # total recorded time [ms]
+        amp = 0.5  # hyperpolarizing step [nA], kept subthreshold
+
+        # --- (i) full morphology in NEURON ------------------------------
+        tree_full = self._build_T_phystree()
+        tree_full.set_comp_tree()
+        sim_full = NeuronSimTree(tree_full)
+        sim_full.set_default_tree("computational")
+        sim_full.init_model(dt=dt, t_calibrate=cal)
+        sim_full.store_locs([(1, 0.5)], name="rec locs")
+        sim_full.add_i_clamp((1, 0.5), amp, delay, dur)
+        res_full = sim_full.run(tmax)
+        sim_full.delete_model()
+        t_full, v_full = res_full["t"], res_full["v_m"][0]
+
+        # --- (ii) uncorrected somatic NEST reduction --------------------
+        cfit_red = CompartmentFitter(
+            self._build_T_phystree(), save_cache=False, recompute_cache=True
+        )
+        ctree_red, _ = cfit_red.fit_model([(1, 0.5)])
+        assert not ctree_red.has_correction_compartments()
+        t_red, v_red = self._simulate_nest_dc_step(
+            ctree_red, amp, delay, dur, cal, dt, tmax
+        )
+
+        # --- (iii) corrected somatic NEST reduction ---------------------
+        cfit_hyb = CompartmentFitter(
+            self._build_T_phystree(), save_cache=False, recompute_cache=True
+        )
+        ctree_hyb, _ = cfit_hyb.fit_model([(1, 0.5)], kernel_correction=[0])
+        # the correction must have induced dummy compartments, otherwise the
+        # corrected and uncorrected reductions are identical
+        assert ctree_hyb.has_correction_compartments()
+        t_hyb, v_hyb = self._simulate_nest_dc_step(
+            ctree_hyb, amp, delay, dur, cal, dt, tmax
+        )
+
+        # --- compare the step responses ---------------------------------
+        # work on a common length and compare the deflection from the
+        # pre-step baseline, which removes any small DC offset between the
+        # models and isolates the (transient) response shape that the
+        # correction acts on.
+        imax = min(len(v_full), len(v_red), len(v_hyb))
+        i_base = int(delay / dt) - 1
+
+        def deflection(v):
+            return v[:imax] - v[i_base]
+
+        d_full = deflection(v_full)
+        d_red = deflection(v_red)
+        d_hyb = deflection(v_hyb)
+
+        rmse_red = np.sqrt(np.mean((d_full - d_red) ** 2))
+        rmse_hyb = np.sqrt(np.mean((d_full - d_hyb) ** 2))
+
+        print(f"RMSE uncorrected reduction: {rmse_red:.4f} mV")
+        print(f"RMSE corrected reduction: {rmse_hyb:.4f} mV")
+
+        if pplot:
+            pl.figure("admittance correction DC step")
+            pl.plot(t_full[:imax], d_full, "g-", label="full (NEURON)")
+            pl.plot(t_red[:imax], d_red, "b--", label="reduction (NEST)")
+            pl.plot(t_hyb[:imax], d_hyb, "r-.", label="reduction + correction (NEST)")
+            pl.xlabel("t [ms]")
+            pl.ylabel(r"$\Delta v$ [mV]")
+            pl.legend(loc=0)
+            pl.show()
+
+        # the corrected reduction must track the full model much better
+        # as the uncorrected one
+        assert rmse_hyb < 0.1 * rmse_red
+
 
 if __name__ == "__main__":
     tn = TestNest()
     # tn.test_model_construction()
     # tn.test_initialization()
-    tn.test_single_comp_nest_neuron_comparison(pplot=True)
+    # tn.test_single_comp_nest_neuron_comparison(pplot=True)
     # tn.test_axon_nest_neuron_comparison(pplot=True)
     # tn.test_dend_nest_neuron_comparison(pplot=True)
+    tn.test_admittance_correction_dc_step(pplot=True)

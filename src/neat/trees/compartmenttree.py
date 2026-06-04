@@ -87,13 +87,12 @@ class CompartmentNode(SNode):
         self._loc_idx = loc_idx
 
     def get_loc_idx(self):
-        if self._loc_idx is None:
-            raise AttributeError(
-                "`self.loc_idx` is undefined, this node has "
-                + "not been associated with a location"
-            )
-        else:
-            return self._loc_idx
+        # `None` is a sentinel used by the admittance-kernel correction
+        # to mark dummy compartments that have no associated MorphLoc.
+        # Returning `None` here (instead of raising) lets the standard tree
+        # traversal helpers filter dummy nodes without needing exception
+        # handling, while still being explicit about "no location".
+        return self._loc_idx
 
     loc_idx = property(get_loc_idx, set_loc_idx)
 
@@ -692,7 +691,10 @@ class CompartmentTree(STree):
         ----------
         e_eq: float or np.array of floats
             The equilibrium potential(s). If a float, the same potential is set
-            at every node. If a numpy array, must have the same length as `self`
+            at every node. If a numpy array with `indexing='tree'`, must have the
+            same length as `self`. If a numpy array with `indexing='locs'`, must
+            have the same length as the number of location-bearing nodes (dummy
+            compartments added by `compute_admittance_correction` are skipped).
         indexing: 'locs' or 'tree'
             The ordering of the equilibrium potentials. If 'locs', assumes the
             equilibrium potentials are in the order of the list of locations
@@ -700,12 +702,17 @@ class CompartmentTree(STree):
             of which nodes appear during iteration
         """
         if isinstance(e_eq, float) or isinstance(e_eq, int):
-            e_eq = e_eq * np.ones(len(self), dtype=float)
-        elif indexing == "locs":
-            e_eq = self._permute_to_tree(np.array(e_eq))
+            for node in self:
+                node.e_eq = float(e_eq)
+            return
 
-        for ii, node in enumerate(self):
-            node.e_eq = e_eq[ii]
+        if indexing == "locs":
+            e_eq_arr = self._permute_to_tree(np.array(e_eq))
+            for node, val in zip(self._iter_loc_nodes(), e_eq_arr):
+                node.e_eq = val
+        else:
+            for ii, node in enumerate(self):
+                node.e_eq = e_eq[ii]
 
     def get_e_eq(self, indexing="locs"):
         """
@@ -736,15 +743,22 @@ class CompartmentTree(STree):
         Parameters
         ----------
         conc_eq: `np.array` or float
-            The equilibrium concentrations [mM]
+            The equilibrium concentrations [mM]. If a numpy array with
+            `indexing='locs'`, dummy compartments (those with `loc_idx is None`)
+            are skipped.
         """
         if isinstance(conc_eq, float) or isinstance(conc_eq, int):
-            conc_eq = conc_eq * np.ones(len(self), dtype=float)
-        elif indexing == "locs":
-            conc_eq = self._permute_to_tree(np.array(conc_eq))
+            for node in self:
+                node.set_conc_eq(ion, float(conc_eq))
+            return
 
-        for ii, node in enumerate(self):
-            node.set_conc_eq(ion, conc_eq[ii])
+        if indexing == "locs":
+            conc_eq_arr = self._permute_to_tree(np.array(conc_eq))
+            for node, val in zip(self._iter_loc_nodes(), conc_eq_arr):
+                node.set_conc_eq(ion, val)
+        else:
+            for ii, node in enumerate(self):
+                node.set_conc_eq(ion, conc_eq[ii])
 
     def get_conc_eq(self, ion, indexing="locs"):
         """
@@ -879,16 +893,67 @@ class CompartmentTree(STree):
         for node in self:
             node.add_conc_mech(ion, params=params)
 
+    def _iter_loc_nodes(self):
+        """
+        Iterate over tree nodes that correspond to an actual fit location,
+        i.e. nodes whose `loc_idx is not None`. Admittance-kernel correction
+        dummy compartments have `loc_idx is None` and are skipped.
+        """
+        for node in self:
+            if node.loc_idx is not None:
+                yield node
+
+    def has_correction_compartments(self):
+        """
+        Whether the tree contains admittance-kernel correction dummy
+        compartments. These are leaf nodes attached by
+        `CompartmentFitter.compute_admittance_correction` and are marked
+        by ``loc_idx is None`` (they have no associated location).
+
+        Returns
+        -------
+        bool
+        """
+        return any(node.loc_idx is None for node in self)
+
+    def remove_correction_compartments(self):
+        """
+        Remove all admittance-kernel correction dummy compartments
+        (those with ``loc_idx is None``) from the tree, in place.
+
+        Dummy compartments are always attached as leaves to a host
+        compartment (see
+        `CompartmentFitter.compute_admittance_correction`), so removing
+        them leaves the structure of the location-bearing compartments
+        intact. Because the dummies are always assigned the highest node
+        indices, the remaining (location-bearing) compartments keep a
+        consecutive ``0 .. N-1`` indexing.
+
+        Returns
+        -------
+        int
+            The number of dummy compartments that were removed.
+        """
+        dummy_nodes = [node for node in self if node.loc_idx is None]
+        for node in dummy_nodes:
+            # dummies are leaves, so this removes only the dummy itself
+            self.remove_node(node)
+        return len(dummy_nodes)
+
     def permute_to_tree_idxs(self):
         """
-        Returns index array for the permutation of location indices to tree indices
+        Returns index array for the permutation of location indices to tree
+        indices. Skips dummy nodes (those with `loc_idx is None`); the returned
+        array has length equal to the number of location-bearing nodes.
         """
-        return np.array([node.loc_idx for node in self])
+        return np.array([node.loc_idx for node in self._iter_loc_nodes()], dtype=int)
 
     def _permute_to_tree(self, mat):
         """
-        Permutes the input array, which is assumed to be ordered according to the
-        location list, to the tree order
+        Permutes the input array, which is assumed to be ordered according to
+        the location list, to the tree order (location-bearing nodes only).
+        Dummy nodes (`loc_idx is None`) are skipped: the returned array has
+        length equal to the number of location-bearing nodes.
         """
         index_arr = self.permute_to_tree_idxs()
         if mat.ndim == 1:
@@ -898,14 +963,36 @@ class CompartmentTree(STree):
 
     def permute_to_locs_idxs(self):
         """
-        Return an index array that can be used to permute matrices that follow to tree
-        order to the location list order
+        Return an index array that can be used to permute tree-iteration-order
+        arrays (restricted to location-bearing nodes) to location list order.
+        Dummy nodes (`loc_idx is None`) are skipped.
         """
-        loc_idxs = np.array([node.loc_idx for node in self])
+        loc_idxs = np.array(
+            [node.loc_idx for node in self._iter_loc_nodes()], dtype=int
+        )
         return np.argsort(loc_idxs)
 
+    def _loc_node_positions(self):
+        """
+        Return an array of positions (in tree iteration order) of nodes whose
+        `loc_idx is not None`. Used to extract the location-bearing rows/cols
+        from a full tree-ordered array.
+        """
+        return np.array(
+            [ii for ii, node in enumerate(self) if node.loc_idx is not None],
+            dtype=int,
+        )
+
     def _permuteToLocs(self, mat):
-        index_arr = self.permute_to_locs_idxs()
+        """
+        Takes a tree-iteration-ordered array (potentially including entries for
+        admittance-correction dummy nodes), extracts the location-bearing
+        entries, and reorders them to location list order.
+        """
+        sort_idxs = self.permute_to_locs_idxs()
+        # positions of location-bearing nodes in tree iteration order
+        loc_positions = self._loc_node_positions()
+        index_arr = loc_positions[sort_idxs]
         if mat.ndim == 1:
             return mat[index_arr]
         else:
@@ -914,16 +1001,18 @@ class CompartmentTree(STree):
     def get_equivalent_locs(self):
         """
         Get list of fake locations in the same order as original list of locations
-        to which the compartment tree was fitted.
+        to which the compartment tree was fitted. Admittance-correction dummy
+        nodes (those with `loc_idx is None`) are skipped.
 
         Returns
         -------
         list of tuple
             Tuple has the form `(node.index, .5)`
         """
-        loc_idxs = [node.loc_idx for node in self]
+        real_nodes = list(self._iter_loc_nodes())
+        loc_idxs = [node.loc_idx for node in real_nodes]
         index_arr = np.argsort(loc_idxs)
-        locs_unordered = [(node.index, 0.5) for node in self]
+        locs_unordered = [(node.index, 0.5) for node in real_nodes]
         return [locs_unordered[ind] for ind in index_arr]
 
     def calc_impedance_matrix(
@@ -955,14 +1044,28 @@ class CompartmentTree(STree):
                 frequency, the second and third dimension contain the impedance
                 matrix for that frequency
         """
-        return np.linalg.inv(
-            self.calc_system_matrix(
-                freqs=freqs,
-                channel_names=channel_names,
-                indexing=indexing,
-                use_conc=use_conc,
-            )
+        # Build the full tree-order system matrix and invert it. When dummy
+        # compartments (loc_idx is None) are present in the tree, inverting
+        # the loc-only submatrix of S would give the impedance of a model
+        # without those dummies (the Schur complement that eliminates them
+        # would not be applied). Inverting the full tree-order S first and
+        # then extracting the loc-bearing rows/cols of Z yields the correct
+        # driving-point and transfer impedances among the location-bearing
+        # compartments with the dummy compartments still attached as load.
+        s_mat = self.calc_system_matrix(
+            freqs=freqs,
+            channel_names=channel_names,
+            indexing="tree",
+            use_conc=use_conc,
         )
+        z_mat = np.linalg.inv(s_mat)
+        if indexing == "locs":
+            z_mat = self._permuteToLocs(z_mat)
+        elif indexing != "tree":
+            raise ValueError(
+                "invalid argument for `indexing`, has to be 'tree' or 'locs'"
+            )
+        return z_mat
 
     def calc_impulse_response_matrix(
         self,
@@ -1013,7 +1116,7 @@ class CompartmentTree(STree):
         zf_mat = self.calc_impedance_matrix(
             freqs=ft.freqs,
             channel_names=channel_names,
-            indexing=indexing,
+            indexing="tree",
             use_conc=use_conc,
         )
 
@@ -1044,6 +1147,15 @@ class CompartmentTree(STree):
                         method=method,
                     )
                 zt_mat[:, jj, ii] = zt_mat[:, ii, jj]
+
+        if indexing == "locs":
+            zt_mat = self._permuteToLocs(zt_mat)
+            if compute_time_derivative:
+                dzt_dt_mat = self._permuteToLocs(dzt_dt_mat)
+        elif indexing != "tree":
+            raise ValueError(
+                "invalid argument for `indexing`, has to be 'tree' or 'locs'"
+            )
 
         if compute_time_derivative:
             return zt_mat, dzt_dt_mat

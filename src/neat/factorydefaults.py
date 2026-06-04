@@ -23,7 +23,7 @@ import numpy as np
 import numpy.typing as npt
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -132,6 +132,13 @@ class FitParams:
     #     16., 17., 18., 19., 20.,
     #     ]) # ms
     # )
+
+    # admittance-kernel correction: minimal degree of the rational fit
+    min_degree: int = 4
+    # admittance-kernel correction: maximal degree of the rational fit
+    max_degree: int = 40
+    # admittance-kernel correction: maximum relative error of the fit
+    max_rel_error: float = 1e-4
 
 
 @dataclass

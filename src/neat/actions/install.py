@@ -447,8 +447,6 @@ def _compile_nest(
 ):
     from pynestml.frontend.pynestml_frontend import generate_nest_compartmental_target
 
-    print("!!! codegen_opts in _compile_nest:", codegen_opts)
-
     # assert that `model_name` is a pure name
     assert not "/" in model_name
     assert not "." in model_name
@@ -538,6 +536,21 @@ def _install_models(
           code uses a fast polynomial approximation only for dynamic propagator
           ``exp()`` terms in hot loops; all other exponentials use
           ``std::exp``/``std::expf``.
+        - ``single_precision_propagator_exp_mode``: ``"bounded"`` or
+          ``"plain"`` (default: ``"bounded"``). Only used when
+          ``fp_precision="single"`` and ``use_fastexp=False``. Selects
+          bounded or raw ``std::expf`` evaluation for propagator exponentials.
+        - ``with_profiling``: bool (default: ``False``). If ``True``, generated
+          models expose cumulative profiling recordables for matrix assembly,
+          Hines solves, and current evaluation.
+        - ``with_detailed_recordables``: bool (default: ``False``). If
+          ``True``, generated models expose additional multimeter recordables
+          for runtime propagators and pure helper functions such as ``*_inf_*``
+          and ``tau_*`` values.
+        - ``freeze_exp_mode``: ``"none"`` or ``"freeze_init"`` (default:
+          ``"none"``). ``"freeze_init"`` replaces runtime ``exp`` evaluations
+          in ``f_numstep()`` with values computed once in ``pre_run_hook()``
+          from the initialized model state and timestep.
     """
     model_name = _resolve_model_name(model_name, channel_path_arg)
 

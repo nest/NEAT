@@ -322,7 +322,7 @@ class TestBrian2:
                 ax.plot(res_brian2["t"][:idx], res_brian2["v_m"][ii][:idx], "bo--")
             pl.show()
 
-    def load_T_tree(self):
+    def load_T_tree(self, fit_locs=None, kernel_correction=None):
         tree = PhysTree(
             os.path.join(MORPHOLOGIES_PATH_PREFIX, "Ttree_segments.swc"),
             types=[1, 2, 3, 4],
@@ -337,10 +337,54 @@ class TestBrian2:
             ca_chan, 0.005 * 1e6, 132.4579341637009, node_arg=[tree[1]]
         )
         tree.fit_leak_current(-70.0, 15.0)
+        self.tree = tree
 
-        locs = [(n.index, 0.5) for n in tree]
+        if fit_locs is None:
+            fit_locs = [(n.index, 0.5) for n in tree]
         cfit = CompartmentFitter(tree, save_cache=False, recompute_cache=True)
-        self.ctree, _ = cfit.fit_model(locs)
+        self.ctree, _ = cfit.fit_model(fit_locs, kernel_correction=kernel_correction)
+
+    def test_ignore_correction_compartments(self):
+        """
+        A somatic fit with an admittance-kernel correction attaches passive
+        dummy compartments (``loc_idx is None``) to the soma. These cannot be
+        represented in Brian2, so `Brian2CompartmentTree` must drop them (with
+        a warning) while leaving the location-bearing compartments intact.
+        """
+        self.load_T_tree(fit_locs=[(1, 0.5)], kernel_correction=[0])
+        ctree = self.ctree
+
+        # the correction should have induced dummy compartments
+        dummy_idxs = [n.index for n in ctree if n.loc_idx is None]
+        real_idxs = [n.index for n in ctree if n.loc_idx is not None]
+        assert len(dummy_idxs) > 0, (
+            "the somatic admittance correction did not induce any dummy "
+            "compartments; the test cannot verify they are ignored"
+        )
+        assert ctree.has_correction_compartments()
+
+        # building the Brian2 model should warn about (and ignore) the dummies
+        with pytest.warns(UserWarning):
+            bct = Brian2CompartmentTree(ctree, channel_storage=ctree.channel_storage)
+
+        # the dummy compartments are dropped from the Brian2 tree ...
+        assert not bct.has_correction_compartments()
+        for di in dummy_idxs:
+            assert bct[di] is None
+        # ... while the location-bearing compartments remain
+        for ri in real_idxs:
+            assert bct[ri] is not None
+        assert len([n for n in bct]) == len(real_idxs)
+
+        # the caller's tree must be left untouched (dummies still present)
+        assert ctree.has_correction_compartments()
+        assert len([n for n in ctree if n.loc_idx is None]) == len(dummy_idxs)
+
+        # the pruned model must be buildable (no non-physical geometry); the
+        # Brian2 model has one compartment per location-bearing node
+        brian2.start_scope()
+        bmodel = bct.init_model()
+        assert len(bmodel.v) == len(real_idxs)
 
     def test_dend_brian2_neuron_comparison(self, pplot=False):
         dt = 0.01
