@@ -222,13 +222,65 @@ class STree(object):
         -------
             `neat.SNode` or None
         """
-        return self._find_node(self.root, index)
+        return self._node_from_index(index, self.root)
+
+    def _invalidate_index_cache(self):
+        """
+        Signal that the tree structure (or a node index) has changed, so that
+        the cached ``index -> node`` map used by `__getitem__` is rebuilt on
+        the next lookup.
+
+        This is called automatically by the structure-mutating methods of this
+        class. Code that manipulates the node structure directly (bypassing
+        these methods, e.g. via `neat.SNode.add_child`) must call this method
+        itself to keep `__getitem__` consistent.
+        """
+        # a monotonically increasing version is cheaper and safer than clearing
+        # the cache in place: every cached map is tagged with the version it was
+        # built at, so any structural change invalidates all of them at once
+        self._index_version = getattr(self, "_index_version", 0) + 1
+
+    def _node_from_index(self, index, root):
+        """
+        Return the node with the given ``index`` in the subtree of ``root``.
+
+        A cached ``index -> node`` map is used to make the lookup O(1). The
+        cache is keyed on the ``root`` node so that alternating between
+        different (sub)trees -- e.g. the original and the computational tree of
+        a `neat.MorphTree`, which are selected by swapping `self.root` -- each
+        keep their own map. Every map is tagged with `self._index_version`; a
+        structural change bumps that version (see `_invalidate_index_cache`),
+        invalidating all maps without an O(n) sweep.
+        """
+        if root is None:
+            return None
+        version = getattr(self, "_index_version", 0)
+        cache = getattr(self, "_index_cache", None)
+        if cache is None:
+            cache = self._index_cache = {}
+        entry = cache.get(root)
+        if entry is None or entry[0] != version:
+            # rebuild the map for this root. `self.__iter__` respects the
+            # node-skipping of the subclass (e.g. the soma helper nodes 2 and 3
+            # of `neat.MorphTree`), so the cache matches the default
+            # `__getitem__` semantics exactly. `setdefault` keeps the first node
+            # encountered in iteration order, matching the depth-first search.
+            index_map = {}
+            for node in self.__iter__(node=root):
+                index_map.setdefault(node.index, node)
+            entry = (version, index_map)
+            # drop stale-version entries so detached roots can be garbage
+            # collected and the cache stays bounded
+            for stale_root in [r for r, e in cache.items() if e[0] != version]:
+                del cache[stale_root]
+            cache[root] = entry
+        return entry[1].get(index, None)
 
     def _find_node(self, node, index):
         """
-        Breadth-first/stack iteration to replace the recursive call.
-        Traverses the tree until it finds the node you are looking for.
-        Returns SNode when found and None when not found
+        Iterative depth-first search for the node with the given ``index``,
+        starting from ``node``. Returns the `neat.SNode` when found and ``None``
+        otherwise. Used as an uncached fallback by `__getitem__`.
 
         Parameters
         ----------
@@ -241,15 +293,12 @@ class STree(object):
         -------
             `neat.SNode`
         """
-        stack = []
-        stack.append(node)
-        while len(stack) != 0:
-            for cnode in stack:
-                if cnode.index == index:
-                    return cnode
-                else:
-                    stack.remove(cnode)
-                    stack.extend(cnode.get_child_nodes())
+        stack = [node] if node is not None else []
+        while stack:
+            cnode = stack.pop()
+            if cnode.index == index:
+                return cnode
+            stack.extend(cnode.get_child_nodes())
         return None  # Not found!
 
     def __len__(self, node=None):
@@ -515,6 +564,7 @@ class STree(object):
         if pnode is not None:
             node.set_parent_node(pnode)
             pnode.add_child(node)
+            self._invalidate_index_cache()
         else:
             warnings.warn("`pnode` was `None`, did nothing.")
 
@@ -530,6 +580,7 @@ class STree(object):
                 node to be removed
         """
         node.get_parent_node().remove_child(node)
+        self._invalidate_index_cache()
 
     def remove_node(self, node):
         """
@@ -542,6 +593,7 @@ class STree(object):
         """
         node.get_parent_node().remove_child(node)
         self._deep_remove(node)
+        self._invalidate_index_cache()
 
     def _deep_remove(self, node):
         cnodes = node.get_child_nodes()
@@ -567,6 +619,7 @@ class STree(object):
         for cnode in cnodes:
             cnode.set_parent_node(pnode)
             pnode.add_child(cnode)
+        self._invalidate_index_cache()
 
     def insert_node(self, node, pnode, pcnodes=[]):
         """
@@ -608,6 +661,7 @@ class STree(object):
             node.set_parent_node(None)
             node.add_child(cnode)
             self.root = node
+        self._invalidate_index_cache()
 
     def reset_indices(self, n=0):
         """
@@ -615,6 +669,7 @@ class STree(object):
         """
         for ind, node in enumerate(self):
             node.index = ind + n
+        self._invalidate_index_cache()
 
     def get_sub_tree(self, node, new_tree=None):
         """

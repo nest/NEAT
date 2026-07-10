@@ -182,3 +182,71 @@ def test_load_neuron_model_skips_duplicate_modern_loads(monkeypatch):
         assert calls == [str(model_path)]
     finally:
         shutil.rmtree(model_path)
+
+
+def test_apply_neat_neuron_defaults_sets_runtime_globals(monkeypatch):
+    neuronmodel = _load_neuronmodel(monkeypatch)
+
+    class FakeDefaults:
+        def __init__(self):
+            self.temp = 36.0
+            self.conc = {"na": 11.0, "k": 22.0, "ca": 33.0}
+            self.conc_ext = {"na": 111.0, "k": 222.0, "ca": 333.0}
+
+    monkeypatch.setattr(neuronmodel, "DefaultPhysiology", FakeDefaults)
+
+    neuronmodel.h.celsius = 6.3
+    neuronmodel.h.nai0_na_ion = 10.0
+    neuronmodel.h.ki0_k_ion = 54.4
+    neuronmodel.h.cai0_ca_ion = 5e-05
+    neuronmodel.h.nao0_na_ion = 140.0
+    neuronmodel.h.ko0_k_ion = 2.5
+    neuronmodel.h.cao0_ca_ion = 2.0
+
+    neuronmodel._apply_neat_neuron_defaults()
+
+    assert neuronmodel.h.celsius == 36.0
+    assert neuronmodel.h.nai0_na_ion == 11.0
+    assert neuronmodel.h.ki0_k_ion == 22.0
+    assert neuronmodel.h.cai0_ca_ion == 33.0
+    assert neuronmodel.h.nao0_na_ion == 111.0
+    assert neuronmodel.h.ko0_k_ion == 222.0
+    assert neuronmodel.h.cao0_ca_ion == 333.0
+
+
+def test_load_neuron_model_applies_defaults_after_loading(monkeypatch):
+    neuronmodel = _load_neuronmodel(monkeypatch)
+
+    class FakeDefaults:
+        def __init__(self):
+            self.temp = 36.0
+            self.conc = {"na": 11.0, "k": 22.0, "ca": 33.0}
+            self.conc_ext = {"na": 111.0, "k": 222.0, "ca": 333.0}
+
+    monkeypatch.setattr(neuronmodel, "DefaultPhysiology", FakeDefaults)
+
+    def fake_load_mechanisms(path):
+        return True
+
+    monkeypatch.setattr(neuronmodel.neuron, "load_mechanisms", fake_load_mechanisms)
+
+    model_name = f"test_model_{uuid.uuid4().hex}"
+    model_path = Path(neuronmodel.__file__).resolve().parent / "tmp" / model_name
+    model_path.mkdir(parents=True)
+
+    try:
+        (model_path / "build_info.json").write_text(
+            json.dumps(neuronmodel._get_neuron_runtime_metadata())
+        )
+
+        neuronmodel.load_neuron_model(model_name)
+
+        assert neuronmodel.h.celsius == 36.0
+        assert neuronmodel.h.nai0_na_ion == 11.0
+        assert neuronmodel.h.ki0_k_ion == 22.0
+        assert neuronmodel.h.cai0_ca_ion == 33.0
+        assert neuronmodel.h.nao0_na_ion == 111.0
+        assert neuronmodel.h.ko0_k_ion == 222.0
+        assert neuronmodel.h.cao0_ca_ion == 333.0
+    finally:
+        shutil.rmtree(model_path)

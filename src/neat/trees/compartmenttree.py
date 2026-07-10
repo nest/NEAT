@@ -444,10 +444,14 @@ class CompartmentNode(SNode):
             v, sv = self._construct_channel_args(channel)
 
             if channel_name not in p_open_channels:
-                i_tot = i_tot + g * channel.compute_p_open(v, **sv) * (v - e)
+                i_tot = i_tot + g * channel.compute_p_open(
+                    v, **sv
+                ) * channel.f_driving_force(*channel._df_call_args(v, e, **sv))
 
             else:
-                i_tot = i_tot + g * p_open_channels[channel_name] * (v - e)
+                i_tot = i_tot + g * p_open_channels[
+                    channel_name
+                ] * channel.f_driving_force(*channel._df_call_args(v, e, **sv))
 
         return i_tot
 
@@ -490,7 +494,11 @@ class CompartmentNode(SNode):
 
             svar_terms[channel_name] = {}
             for svar, dp_dx_ in dp_dx.items():
-                svar_terms[channel_name][svar] = g * dp_dx_ * (e - v)
+                svar_terms[channel_name][svar] = (
+                    g
+                    * dp_dx_
+                    * -channel.f_driving_force(*channel._df_call_args(v, e, **sv))
+                )
 
         return svar_terms
 

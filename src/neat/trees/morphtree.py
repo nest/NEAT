@@ -31,7 +31,8 @@ import copy
 import pathlib
 import warnings
 from typing import Literal
-from functools import reduce
+from functools import reduce, wraps
+from inspect import signature
 from contextlib import contextmanager
 
 from .stree import SNode, STree
@@ -53,6 +54,7 @@ def computational_tree_decorator(fun):
     """
 
     # wrapper to access self
+    @wraps(fun)
     def wrapped(self, *args, **kwargs):
         if self._computational_root is None:
             raise AttributeError(
@@ -66,7 +68,7 @@ def computational_tree_decorator(fun):
             res = fun(self, *args, **kwargs)
         return res
 
-    wrapped.__doc__ = fun.__doc__
+    wrapped.__signature__ = signature(fun)
     return wrapped
 
 
@@ -77,12 +79,13 @@ def original_tree_decorator(fun):
     """
 
     # wrapper to access self
+    @wraps(fun)
     def wrapped(self, *args, **kwargs):
         with self.as_original_tree:
             res = fun(self, *args, **kwargs)
         return res
 
-    wrapped.__doc__ = fun.__doc__
+    wrapped.__signature__ = signature(fun)
     return wrapped
 
 
@@ -504,13 +507,19 @@ class MorphTree(STree):
         Returns:
             `neat.MorphNode` or None
         """
+        # the cached lookup builds its map from `self.__iter__`, which skips the
+        # soma helper nodes 2 and 3; it therefore matches only the default
+        # `skip_inds`. Any other `skip_inds` uses the uncached search.
+        if tuple(skip_inds) == (2, 3):
+            return self._node_from_index(index, self.root)
         return self._find_node(self.root, index, skip_inds=skip_inds)
 
     def _find_node(self, node, index, skip_inds=(2, 3)):
         """
-        Breadth-first/stack iteration to replace the recursive call.
-        Traverses the tree until it finds the node you are looking for.
-        Returns SNode when found and None when not found
+        Iterative depth-first search for the node with the given ``index``,
+        starting from ``node``, skipping the node indices in ``skip_inds``.
+        Returns the `neat.MorphNode` when found and ``None`` otherwise. Used as
+        an uncached fallback by `__getitem__`.
 
         Parameters
         ----------
@@ -523,15 +532,12 @@ class MorphTree(STree):
         -------
             :class:`SNode`
         """
-        stack = []
-        stack.append(node)
-        while len(stack) != 0:
-            for cnode in stack:
-                if cnode.index == index:
-                    return cnode
-                else:
-                    stack.remove(cnode)
-                    stack.extend(cnode.get_child_nodes(skip_inds=skip_inds))
+        stack = [node] if node is not None else []
+        while stack:
+            cnode = stack.pop()
+            if cnode.index == index:
+                return cnode
+            stack.extend(cnode.get_child_nodes(skip_inds=skip_inds))
         return None  # Not found!
 
     def __iter__(self, node=None, skip_inds=(2, 3)):
@@ -569,6 +575,7 @@ class MorphTree(STree):
         """
         for ind, node in enumerate(self):
             node.index = ind + 1
+        self._invalidate_index_cache()
 
     def get_nodes(self, skip_inds=(2, 3)):
         """
@@ -1116,11 +1123,18 @@ class MorphTree(STree):
         compnode_indices = [node.index for node in compnodes]
         nodes = copy.deepcopy(self.nodes)
 
+        # Map the original-tree nodes by index once. The loop below only mutates
+        # the deep-copied `nodes` (the future computational tree) via
+        # `remove_single_node`; the original tree -- and hence this map -- stays
+        # valid throughout, so we avoid the repeated `self[...]` lookups whose
+        # cache would otherwise be invalidated on every `remove_single_node`.
+        orig_by_index = {onode.index: onode for onode in self}
+
         for node in nodes:
             if node.index not in compnode_indices:
                 self.remove_single_node(node)
             elif node.parent_node != None:
-                orig_node = self[node.index]
+                orig_node = orig_by_index[node.index]
                 orig_bnode = node.parent_node
                 L, R = self.path_length(
                     {"node": orig_bnode.index, "x": 1.0},
@@ -1132,7 +1146,7 @@ class MorphTree(STree):
                 node.used_in_comp_tree = True
                 orig_node.used_in_comp_tree = True
             else:
-                orig_node = self[node.index]
+                orig_node = orig_by_index[node.index]
                 node.used_in_comp_tree = True
                 orig_node.used_in_comp_tree = True
 
@@ -2521,7 +2535,64 @@ class MorphTree(STree):
             the bifurcation locs
         """
         locs = self.convert_loc_arg_to_locs(loc_arg)
-        locs_ = reduce(lambda l, x: l.append(x) or l if x not in l else l, locs, [])
+
+        # Deduplicate by mapping each location onto a hashable canonical key
+        # instead of the O(n^2) `x not in l` membership test with the expensive
+        # `MorphLoc.__eq__`. The key reproduces the equality relation of
+        # `MorphLoc.__eq__` exactly:
+        #   - all locations on the soma (node 1) are equal (any `x`),
+        #   - a location at `x ~ 0` coincides with the `x ~ 1` end of its parent
+        #     node (chaining to the soma if the parent is the soma),
+        #   - a location at `x ~ 1` coincides with the `x ~ 1` end of that node,
+        #   - interior locations are equal iff they lie on the same node with
+        #     `np.allclose` `x`.
+        # Locations aliased to a parent (for `x ~ 0`) are only aliased for the
+        # purpose of the key: the original location object, with its exact
+        # coordinates, is what gets kept and returned/stored.
+        eps = 1e-8
+        # parent-index lookup, built in a single O(n) pass over the (active)
+        # tree so that boundary aliasing does not require the O(n) `self[index]`
+        # search per location
+        parent_idx = {
+            node.index: (node.parent_node.index if node.parent_node is not None else -1)
+            for node in self
+        }
+
+        def _top_key(idx):
+            # canonical key for the `x = 1` end of node `idx`; the soma collapses
+            # to a single key
+            return ("soma",) if idx == 1 else ("top", idx)
+
+        locs_ = []
+        seen_keys = set()  # keys for soma / `x ~ 0` / `x ~ 1` equivalence classes
+        interior_xs = {}  # node index -> list of kept interior `x` values
+        for loc in locs:
+            n, x = loc["node"], loc["x"]
+            if n == 1:
+                key = ("soma",)
+            elif x < eps:
+                # coincides with the `x = 1` end of the parent node
+                key = _top_key(parent_idx[n])
+            elif (1.0 - x) < eps:
+                key = ("top", n)
+            else:
+                key = None  # interior location, handled via `np.allclose` below
+
+            if key is not None:
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+            else:
+                # interior locations are only equal to previously kept interior
+                # locations on the same node (typically a very small group), so
+                # the `np.allclose` comparison stays exact and cheap. The
+                # argument order matches `MorphLoc.__eq__` (`kept == candidate`).
+                xs = interior_xs.setdefault(n, [])
+                if any(np.allclose(x_kept, x) for x_kept in xs):
+                    continue
+                xs.append(x)
+
+            locs_.append(loc)
 
         if name != "dont save":
             self.store_locs(locs_, name=name)
