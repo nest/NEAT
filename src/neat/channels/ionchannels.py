@@ -45,23 +45,74 @@ from ..factorydefaults import DefaultPhysiology
 
 class IfExpVisitor(ast.NodeVisitor):
     """
-    Returns the first `IfExp` node in the ast, signalling an if statement
+    Collects the `IfExp` nodes in the ast, signalling if statements
     """
 
     def __init__(self):
-        self.ifexp_node = None
+        self.ifexp_nodes = []
 
     def visit_IfExp(self, node):
         """
         Function can NOT be renamed, is implicitly called by `ast.NodeVisitor.visit()`
         """
-        self.ifexp_node = node
+        self.ifexp_nodes.append(node)
+        # recurse, so that conditionals nested within this node -- also those
+        # in its test -- are found as well
+        self.generic_visit(node)
+
+    def find_IfExp_nodes(self, node):
+        self.ifexp_nodes = []
+        self.visit(node)
+        return self.ifexp_nodes
 
     def find_IfExp_node(self, node):
-        self.visit(node)
-        return_node = self.ifexp_node
-        self.ifexp_node = None
-        return return_node
+        ifexp_nodes = self.find_IfExp_nodes(node)
+        return ifexp_nodes[0] if len(ifexp_nodes) > 0 else None
+
+    def find_expandable_IfExp_node(self, node):
+        """
+        Returns an `IfExp` node whose test contains no further conditionals, so
+        that the test can be printed as is. Such a node exists whenever the ast
+        contains at least one `IfExp` node.
+        """
+        for ifexp in self.find_IfExp_nodes(node):
+            if len(IfExpVisitor().find_IfExp_nodes(ifexp.test)) == 0:
+                return ifexp
+        return None
+
+
+class _IfExpBranchSelector(ast.NodeTransformer):
+    """
+    Replaces every `IfExp` node whose test equals `test_str` by its `branch`
+    ("body" or "orelse"), thus resolving all occurrences of one and the same
+    conditional at once
+    """
+
+    def __init__(self, test_str, branch):
+        self.test_str = test_str
+        self.branch = branch
+
+    def visit_IfExp(self, node):
+        """
+        Function can NOT be renamed, is implicitly called by
+        `ast.NodeTransformer.visit()`
+        """
+        # children are resolved first, so that the test of this node is final
+        node = self.generic_visit(node)
+        if ast.unparse(node.test) == self.test_str:
+            return getattr(node, self.branch)
+        return node
+
+
+def _expand_ifexp_branch(code_str, test_str, branch):
+    """
+    Parses `code_str`, replaces every `IfExp` node with test `test_str` by its
+    `branch` ("body" or "orelse"), and returns the resulting code string. The
+    conditionals are eliminated from the expression as a whole, as they need
+    not be the root node of the ast.
+    """
+    tree = _IfExpBranchSelector(test_str, branch).visit(ast.parse(code_str))
+    return ast.unparse(tree)
 
 
 class _func(object):
@@ -1264,22 +1315,40 @@ class IonChannel(object):
         """
         tree = ast.parse(code_str)
         iev = IfExpVisitor()
-        ifexp = iev.find_IfExp_node(tree)
+        ifexp = iev.find_expandable_IfExp_node(tree)
 
         if ifexp is not None:
-            # sanity check
-            assert iev.find_IfExp_node(ifexp.test) is None
+            test_str = ast.unparse(ifexp.test)
+
+            # constant tests -- which arise when expanding nested conditionals
+            # -- are resolved here, as `True` and `False` are not valid NESTML
+            if isinstance(ifexp.test, ast.Constant) and isinstance(
+                ifexp.test.value, bool
+            ):
+                branch = "body" if ifexp.test.value else "orelse"
+                return self._create_nestml_funcstr(
+                    _expand_ifexp_branch(code_str, test_str, branch),
+                    n_spaces=n_spaces,
+                    indent=indent,
+                )
+
+            # the conditional is replaced by its branches within the expression
+            # as a whole, as it need not be the root node of the ast
             # if test is True
             cond_1_str = self._create_nestml_funcstr(
-                ast.unparse(ifexp.body), n_spaces=n_spaces, indent=n_spaces + indent
+                _expand_ifexp_branch(code_str, test_str, "body"),
+                n_spaces=n_spaces,
+                indent=n_spaces + indent,
             )
             # if test is False
             cond_0_str = self._create_nestml_funcstr(
-                ast.unparse(ifexp.orelse), n_spaces=n_spaces, indent=n_spaces + indent
+                _expand_ifexp_branch(code_str, test_str, "orelse"),
+                n_spaces=n_spaces,
+                indent=n_spaces + indent,
             )
             code_str = (
                 " " * indent
-                + f"if {ast.unparse(ifexp.test)}:\n"
+                + f"if {test_str}:\n"
                 + f"{cond_1_str}"
                 + " " * indent
                 + f"else:\n"
