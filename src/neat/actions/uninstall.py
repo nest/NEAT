@@ -82,6 +82,16 @@ def _uninstall_models(
             except FileNotFoundError as e:
                 print(f"> {model_name} not found in nest, nothing to uninstall.")
 
+        if "arbor" in simulators:
+            try:
+                path_arbor = os.path.join(
+                    path_neat, "simulations/", f"arbor/tmp/{model_name}/"
+                )
+                shutil.rmtree(path_arbor)
+                print(f"> Uninstalled {model_name} from arbor")
+            except FileNotFoundError as e:
+                print(f"> {model_name} not found in arbor, nothing to uninstall.")
+
         if "neuron" in simulators:
             remove_nrnspecial_wrapper(model_name)
             try:

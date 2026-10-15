@@ -46,6 +46,16 @@ def _list_models(path_neat, simulators=["nest", "neuron"], pprint=True):
             if not len([f for f in glob.glob(path_test)]) == 0:
                 models["nest"].append(file_name)
 
+    if "arbor" in simulators:
+        path_arbor = os.path.join(path_neat, "simulations/", "arbor/tmp/*/")
+
+        for file_path in glob.glob(path_arbor):
+            file_name = os.path.basename(os.path.normpath(file_path))
+            # only append name if directory contains a compiled catalogue
+            path_test = os.path.join(file_path, "*-catalogue.so")
+            if not len(glob.glob(path_test)) == 0:
+                models["arbor"].append(file_name)
+
     if "neuron" in simulators:
         path_neuron = os.path.join(path_neat, "simulations/", "neuron/tmp/*/")
 

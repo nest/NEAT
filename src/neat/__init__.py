@@ -71,6 +71,12 @@ try:
 except ModuleNotFoundError:
     warnings.warn("NEST not available", UserWarning)
 
+from .simulations.arbor.arbormodel import load_arbor_model
+from .simulations.arbor.arbormodel import ArborMechanismLoadError
+from .simulations.arbor.arbormodel import ArborSimTree
+from .simulations.arbor.arbormodel import ArborSimNode
+from .simulations.arbor.arbormodel import ArborCompartmentTree
+
 try:
     from .simulations.brian2.brian2model import Brian2CompartmentTree
     from .simulations.brian2.brian2model import Brian2CompartmentNode

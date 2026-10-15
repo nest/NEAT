@@ -79,12 +79,16 @@ docs = [
 brian2 = [
     "brian2 >= 2.9.0",
 ]
+arbor = [
+    "arbor >= 0.12",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 "neat.simulations.neuron.mech_storage" = ["*.mod"]
+"neat.simulations.arbor.mech_storage" = ["*.mod"]
 "neat.simulations.nest" = ["*.nestml"]
 
 [project.scripts]

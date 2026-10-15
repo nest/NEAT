@@ -33,7 +33,7 @@ def parse_cmd_args(path_neat):
         description="The program compiles and installs neat ion channels models for "
         "simulators of neuronal dynamics.\n"
         "It can also list installed models and uninstall them.\n"
-        "Currently, 'nest' and 'neuron' are supported as simulators"
+        "Currently, 'nest', 'neuron' and 'arbor' are supported as simulators"
     )
 
     parser.add_argument(
@@ -60,7 +60,7 @@ def parse_cmd_args(path_neat):
         "-s",
         "--simulator",
         nargs="*",
-        choices=["neuron", "nest"],
+        choices=["neuron", "nest", "arbor"],
         default=["neuron"],
         help="The simulators to which the action is applied. \n" "Default is 'neuron'",
     )
@@ -70,6 +70,15 @@ def parse_cmd_args(path_neat):
         help="Path to directory containing additional .mod-file mechanisms "
         "(e.g. synapses) that will be compiled together with the "
         "generated ion channel mod files.\n"
+        "Only used when the [action] is 'install'.",
+    )
+    parser.add_argument(
+        "--arborresource",
+        default=os.path.join(path_neat, "simulations/arbor/mech_storage/"),
+        help="Path to directory containing additional .mod-file mechanisms "
+        "(e.g. synapses), written in Arbor's NMODL dialect, that will be "
+        "compiled together with the generated ion channel mod files into an "
+        "Arbor mechanism catalogue.\n"
         "Only used when the [action] is 'install'.",
     )
     parser.add_argument(
@@ -123,6 +132,7 @@ def main():
             simulators=cmd_args.simulator,
             path_neuronresource=cmd_args.neuronresource,
             path_nestresource=cmd_args.nestresource,
+            path_arborresource=cmd_args.arborresource,
             codegen_opts=cmd_args.codegen_opts,
         )
     elif cmd_args.action == "list":
