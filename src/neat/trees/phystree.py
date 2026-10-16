@@ -634,6 +634,12 @@ class PhysTree(MorphTree):
         nodes_with_channel = self.convert_node_arg_to_nodes(node_arg)
         if len(nodes_with_channel) > 0:
             self.channel_storage[channel_name] = channel
+        else:
+            warnings.warn(
+                f"Node argument `{node_arg}` does not return any nodes in this tree, " + \
+                f"no `{channel_name}` channel was added."
+            )
+            return None
 
         channel = self.channel_storage[channel_name]
         # add the ion channel to the nodes
