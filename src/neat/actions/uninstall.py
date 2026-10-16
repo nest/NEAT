@@ -55,7 +55,7 @@ def remove_nrnspecial_wrapper(model_name):
 def _uninstall_models(
     *model_names,
     path_neat,
-    simulators=["nest", "neuron"],
+    simulators=["nest", "neuron", "arbor"],
 ):
     """
     Uninstall the model with the given name from the provided simulators
@@ -81,6 +81,16 @@ def _uninstall_models(
                 print(f"> Uninstalled {model_name} from nest")
             except FileNotFoundError as e:
                 print(f"> {model_name} not found in nest, nothing to uninstall.")
+
+        if "arbor" in simulators:
+            try:
+                path_arbor = os.path.join(
+                    path_neat, "simulations/", f"arbor/tmp/{model_name}/"
+                )
+                shutil.rmtree(path_arbor)
+                print(f"> Uninstalled {model_name} from arbor")
+            except FileNotFoundError as e:
+                print(f"> {model_name} not found in arbor, nothing to uninstall.")
 
         if "neuron" in simulators:
             remove_nrnspecial_wrapper(model_name)

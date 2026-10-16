@@ -165,8 +165,6 @@ class NestCompartmentNode(CompartmentNode):
         else:
             parent_idx = self.parent_node.index
 
-        print(self.index, p_dict)
-
         return {"parent_idx": parent_idx, "params": p_dict}
 
 

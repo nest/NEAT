@@ -29,6 +29,7 @@ import os
 import subprocess
 
 from neat import load_neuron_model, load_nest_model, NeuronMechanismLoadError
+from neat import load_arbor_model, ArborMechanismLoadError
 
 
 def load_or_install_neuron_test_channels():
@@ -65,6 +66,31 @@ def load_or_install_neuron_test_channels():
             pass
         else:
             raise
+
+
+def load_or_install_arbor_test_channels():
+    """
+    neatmodels install multichannel_test -s arbor -p channelcollection_for_tests.py
+    """
+    channel_file = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "channelcollection_for_tests.py")
+    )
+    try:
+        # raises FileNotFoundError if not compiled
+        load_arbor_model("multichannel_test")
+    except (FileNotFoundError, ArborMechanismLoadError):
+        subprocess.call(
+            [
+                "neatmodels",
+                "install",
+                "multichannel_test",
+                "-s",
+                "arbor",
+                "-p",
+                channel_file,
+            ]
+        )
+        load_arbor_model("multichannel_test")
 
 
 def load_or_install_nest_test_channels():

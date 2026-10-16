@@ -21,6 +21,7 @@
 
 import sympy as sp
 import numpy as np
+from sympy.printing.c import C99CodePrinter
 
 import os
 import ast
@@ -45,23 +46,74 @@ from ..factorydefaults import DefaultPhysiology
 
 class IfExpVisitor(ast.NodeVisitor):
     """
-    Returns the first `IfExp` node in the ast, signalling an if statement
+    Collects the `IfExp` nodes in the ast, signalling if statements
     """
 
     def __init__(self):
-        self.ifexp_node = None
+        self.ifexp_nodes = []
 
     def visit_IfExp(self, node):
         """
         Function can NOT be renamed, is implicitly called by `ast.NodeVisitor.visit()`
         """
-        self.ifexp_node = node
+        self.ifexp_nodes.append(node)
+        # recurse, so that conditionals nested within this node -- also those
+        # in its test -- are found as well
+        self.generic_visit(node)
+
+    def find_IfExp_nodes(self, node):
+        self.ifexp_nodes = []
+        self.visit(node)
+        return self.ifexp_nodes
 
     def find_IfExp_node(self, node):
-        self.visit(node)
-        return_node = self.ifexp_node
-        self.ifexp_node = None
-        return return_node
+        ifexp_nodes = self.find_IfExp_nodes(node)
+        return ifexp_nodes[0] if len(ifexp_nodes) > 0 else None
+
+    def find_expandable_IfExp_node(self, node):
+        """
+        Returns an `IfExp` node whose test contains no further conditionals, so
+        that the test can be printed as is. Such a node exists whenever the ast
+        contains at least one `IfExp` node.
+        """
+        for ifexp in self.find_IfExp_nodes(node):
+            if len(IfExpVisitor().find_IfExp_nodes(ifexp.test)) == 0:
+                return ifexp
+        return None
+
+
+class _IfExpBranchSelector(ast.NodeTransformer):
+    """
+    Replaces every `IfExp` node whose test equals `test_str` by its `branch`
+    ("body" or "orelse"), thus resolving all occurrences of one and the same
+    conditional at once
+    """
+
+    def __init__(self, test_str, branch):
+        self.test_str = test_str
+        self.branch = branch
+
+    def visit_IfExp(self, node):
+        """
+        Function can NOT be renamed, is implicitly called by
+        `ast.NodeTransformer.visit()`
+        """
+        # children are resolved first, so that the test of this node is final
+        node = self.generic_visit(node)
+        if ast.unparse(node.test) == self.test_str:
+            return getattr(node, self.branch)
+        return node
+
+
+def _expand_ifexp_branch(code_str, test_str, branch):
+    """
+    Parses `code_str`, replaces every `IfExp` node with test `test_str` by its
+    `branch` ("body" or "orelse"), and returns the resulting code string. The
+    conditionals are eliminated from the expression as a whole, as they need
+    not be the root node of the ast.
+    """
+    tree = _IfExpBranchSelector(test_str, branch).visit(ast.parse(code_str))
+    return ast.unparse(tree)
 
 
 class _func(object):
@@ -180,6 +232,39 @@ def _nmodl_ccode(expr):
     return " ".join(sp.printing.ccode(expr).replace(";", "").split())
 
 
+class _ArborNmodlCodePrinter(C99CodePrinter):
+    """
+    C code printer for Arbor's NMODL dialect, which lacks the `pow`, `fmin` and
+    `fmax` functions of NEURON's NMODL, but has a `^` operator and `min`/`max`.
+    """
+
+    def _print_Pow(self, expr):
+        if expr.exp == sp.S.Half:
+            return f"sqrt({self._print(expr.base)})"
+        if expr.exp == -1:
+            return f"(1.0/({self._print(expr.base)}))"
+        # fully parenthesized, so that the result does not depend on how modcc
+        # ranks `^` with respect to unary minus
+        return f"(({self._print(expr.base)})^({self._print(expr.exp)}))"
+
+    def _print_minmax(self, expr, func_name):
+        args = [self._print(arg) for arg in expr.args]
+        code = args[0]
+        for arg in args[1:]:
+            code = f"{func_name}({code}, {arg})"
+        return code
+
+    def _print_Max(self, expr):
+        return self._print_minmax(expr, "max")
+
+    def _print_Min(self, expr):
+        return self._print_minmax(expr, "min")
+
+
+def _arbor_nmodl_ccode(expr):
+    return " ".join(_ArborNmodlCodePrinter().doprint(expr).replace(";", "").split())
+
+
 def _nmodl_repl(text, repl_pairs):
     """Apply identifier substitutions using word boundaries to avoid partial matches."""
     import re
@@ -196,7 +281,7 @@ def _rebuild_sympy_expr(expr, args):
         return expr.func(*args)
 
 
-def _nmodl_boolean_assignment_lines(lhs, expr, temp_counter=0):
+def _nmodl_boolean_assignment_lines(lhs, expr, temp_counter=0, ccode=_nmodl_ccode):
     expr = sp.sympify(expr)
 
     if expr == True or expr == sp.true:
@@ -204,10 +289,12 @@ def _nmodl_boolean_assignment_lines(lhs, expr, temp_counter=0):
     if expr == False or expr == sp.false:
         return [f"{lhs} = 0"], temp_counter, []
 
-    lines, expr, temp_counter, locals_ = _hoist_piecewise_for_nmodl(expr, temp_counter)
+    lines, expr, temp_counter, locals_ = _hoist_piecewise_for_nmodl(
+        expr, temp_counter, ccode=ccode
+    )
     if getattr(expr, "is_Boolean", False):
         lines += [
-            f"if ({_nmodl_ccode(expr)}) {{",
+            f"if ({ccode(expr)}) {{",
             f"    {lhs} = 1",
             "}",
             "else {",
@@ -215,11 +302,11 @@ def _nmodl_boolean_assignment_lines(lhs, expr, temp_counter=0):
             "}",
         ]
     else:
-        lines.append(f"{lhs} = {_nmodl_ccode(expr)}")
+        lines.append(f"{lhs} = {ccode(expr)}")
     return lines, temp_counter, locals_
 
 
-def _hoist_piecewise_for_nmodl(expr, temp_counter=0):
+def _hoist_piecewise_for_nmodl(expr, temp_counter=0, ccode=_nmodl_ccode):
     expr = sp.sympify(expr)
 
     if expr.func == sp.ITE:
@@ -227,16 +314,16 @@ def _hoist_piecewise_for_nmodl(expr, temp_counter=0):
         temp_counter += 1
         test, then_value, else_value = expr.args
         lines, test_expr, temp_counter, locals_ = _hoist_piecewise_for_nmodl(
-            test, temp_counter
+            test, temp_counter, ccode=ccode
         )
         then_lines, temp_counter, then_locals = _nmodl_boolean_assignment_lines(
-            temp, then_value, temp_counter
+            temp, then_value, temp_counter, ccode=ccode
         )
         else_lines, temp_counter, else_locals = _nmodl_boolean_assignment_lines(
-            temp, else_value, temp_counter
+            temp, else_value, temp_counter, ccode=ccode
         )
         locals_ = [str(temp)] + locals_ + then_locals + else_locals
-        lines += [f"if ({_nmodl_ccode(test_expr)}) {{"]
+        lines += [f"if ({ccode(test_expr)}) {{"]
         lines.extend("    " + line for line in then_lines)
         lines += ["}", "else {"]
         lines.extend("    " + line for line in else_lines)
@@ -252,10 +339,10 @@ def _hoist_piecewise_for_nmodl(expr, temp_counter=0):
 
         for value, condition in expr.args:
             condition_lines, condition_expr, temp_counter, condition_locals = (
-                _hoist_piecewise_for_nmodl(condition, temp_counter)
+                _hoist_piecewise_for_nmodl(condition, temp_counter, ccode=ccode)
             )
             value_lines, value_expr, temp_counter, value_locals = (
-                _hoist_piecewise_for_nmodl(value, temp_counter)
+                _hoist_piecewise_for_nmodl(value, temp_counter, ccode=ccode)
             )
             lines.extend(condition_lines)
             locals_.extend(condition_locals)
@@ -271,17 +358,17 @@ def _hoist_piecewise_for_nmodl(expr, temp_counter=0):
             if condition == True or condition == sp.true:
                 lines.append("else {")
             else:
-                condition_code = _nmodl_ccode(condition)
+                condition_code = ccode(condition)
                 if branch_index == 0:
                     lines.append(f"if ({condition_code}) {{")
                 else:
                     lines.append(f"else if ({condition_code}) {{")
             lines.extend("    " + line for line in value_lines)
-            lines.append(f"    {temp} = {_nmodl_ccode(value_expr)}")
+            lines.append(f"    {temp} = {ccode(value_expr)}")
             lines.append("}")
 
         if lines and lines[0] == "else {":
-            lines = [f"{temp} = {_nmodl_ccode(branch_specs[0][2])}"]
+            lines = [f"{temp} = {ccode(branch_specs[0][2])}"]
 
         return lines, temp, temp_counter, locals_
 
@@ -293,7 +380,7 @@ def _hoist_piecewise_for_nmodl(expr, temp_counter=0):
     new_args = []
     for arg in expr.args:
         arg_lines, arg_expr, temp_counter, arg_locals = _hoist_piecewise_for_nmodl(
-            arg, temp_counter
+            arg, temp_counter, ccode=ccode
         )
         lines.extend(arg_lines)
         locals_.extend(arg_locals)
@@ -305,9 +392,11 @@ def _hoist_piecewise_for_nmodl(expr, temp_counter=0):
     return lines, expr, temp_counter, locals_
 
 
-def _nmodl_assignment_lines(lhs, expr, temp_counter=0):
-    lines, expr, temp_counter, locals_ = _hoist_piecewise_for_nmodl(expr, temp_counter)
-    lines.append(f"{lhs} = {_nmodl_ccode(expr)}")
+def _nmodl_assignment_lines(lhs, expr, temp_counter=0, ccode=_nmodl_ccode):
+    lines, expr, temp_counter, locals_ = _hoist_piecewise_for_nmodl(
+        expr, temp_counter, ccode=ccode
+    )
+    lines.append(f"{lhs} = {ccode(expr)}")
     return lines, temp_counter, locals_
 
 
@@ -1088,6 +1177,82 @@ class IonChannel(object):
         p = self.compute_p_open(v, **kwargs)
         return -D * self.compute_linear_conc(v, freqs, ion, **kwargs) - p * dD_dci_ion
 
+    def _nmodl_current_declaration_lines(self):
+        """
+        Lines of the NMODL ``NEURON`` block that declare the channel current and
+        the ion concentrations the channel reads
+        """
+        cs = [str(conc) for conc in self.conc]
+        lines = []
+        if self.ion == "":
+            lines.append("NONSPECIFIC_CURRENT i")
+        else:
+            # if the ion is both written and read, it has a single USEION line
+            reads = [self.ion + "i"] if self.ion in cs else []
+            if self.ion in self.conc_ext:
+                reads.append(self.ion + "o")
+            if reads:
+                lines.append(
+                    "USEION %s READ %s WRITE i%s"
+                    % (self.ion, ", ".join(reads), self.ion)
+                )
+            else:
+                lines.append("USEION %s WRITE i%s" % (self.ion, self.ion))
+        for c in cs:
+            if c != self.ion:
+                reads = [c + "i"]
+                if c in self.conc_ext:
+                    reads.append(c + "o")
+                lines.append("USEION %s READ %s" % (c, ", ".join(reads)))
+        return lines
+
+    def _nmodl_repl_pairs(self):
+        """
+        Substitutions of NEAT concentration names by NMODL ion variable names
+        (``ca_ext`` -> ``cao``, ``ca`` -> ``cai``, ...). The extracellular
+        substitutions come first so that ``ca`` does not partially match
+        ``ca_ext``.
+        """
+        repl_pairs = [(str(ion) + "_ext", str(ion) + "o") for ion in self.conc_ext]
+        repl_pairs += [(str(c), str(c) + "i") for c in self.conc]
+        return repl_pairs
+
+    def _nmodl_rate_lines(self, repl_pairs, ccode=_nmodl_ccode):
+        """
+        NMODL statements that assign the asymptotic values ``<x>_inf`` and
+        time-scales ``tau_<x>`` of all state variables ``<x>``
+
+        Parameters
+        ----------
+        repl_pairs: list of tuple of str
+            Name substitutions, see :func:`IonChannel._nmodl_repl_pairs`
+        ccode: callable
+            Prints a sympy expression as NMODL code
+
+        Returns
+        -------
+        lines: list of str
+            The NMODL statements
+        local_vars: list of str
+            Auxiliary variables in the statements, to be declared ``LOCAL``
+        """
+        lines = []
+        local_vars = []
+        temp_counter = 0
+        for svar in self.ordered_statevars:
+            var = str(svar)
+            vi_lines, temp_counter, vi_locals = _nmodl_assignment_lines(
+                f"{var}_inf", self.varinf[svar], temp_counter, ccode=ccode
+            )
+            ti_lines, temp_counter, ti_locals = _nmodl_assignment_lines(
+                f"tau_{var}", self.tauinf[svar], temp_counter, ccode=ccode
+            )
+            local_vars.extend(vi_locals + ti_locals)
+            lines.extend(vi_lines + ti_lines)
+
+        lines = [_nmodl_repl(line, repl_pairs) for line in lines]
+        return lines, local_vars
+
     def write_mod_file(self, path, g=0.0, e=None):
         """
         Writes a modfile of the ion channel for simulations with neuron
@@ -1109,34 +1274,8 @@ class IonChannel(object):
 
         file.write("NEURON {\n")
         file.write("    SUFFIX I%s\n" % cname)
-        if self.ion == "":
-            file.write("    NONSPECIFIC_CURRENT i\n")
-        elif self.ion in cs:
-            # ion is both written and read: merge into one USEION line
-            reads = [self.ion + "i"]
-            if self.ion in self.conc_ext:
-                reads.append(self.ion + "o")
-            file.write(
-                "    USEION %s READ %s WRITE i%s\n"
-                % (self.ion, ", ".join(reads), self.ion)
-            )
-        else:
-            reads = []
-            if self.ion in self.conc_ext:
-                reads.append(self.ion + "o")
-            if reads:
-                file.write(
-                    "    USEION %s READ %s WRITE i%s\n"
-                    % (self.ion, ", ".join(reads), self.ion)
-                )
-            else:
-                file.write("    USEION %s WRITE i%s\n" % (self.ion, self.ion))
-        for c in cs:
-            if c != self.ion:
-                reads = [c + "i"]
-                if c in self.conc_ext:
-                    reads.append(c + "o")
-                file.write("    USEION %s READ %s\n" % (c, ", ".join(reads)))
+        for line in self._nmodl_current_declaration_lines():
+            file.write(f"    {line}\n")
         if self._uses_e_rev:
             file.write("    RANGE  g, e" + "\n")
         else:
@@ -1179,10 +1318,7 @@ class IonChannel(object):
             file.write("    %s\n" % var)
         file.write("}\n\n")
 
-        # substitution for common neuron names (ca_ext → cao, ca → cai, etc.)
-        # ext replacements must come first so "ca" doesn't partially match "ca_ext"
-        repl_pairs = [(str(ion) + "_ext", str(ion) + "o") for ion in self.conc_ext]
-        repl_pairs += [(str(c), str(c) + "i") for c in self.conc]
+        repl_pairs = self._nmodl_repl_pairs()
 
         calc_p_open = _nmodl_repl(sp.printing.ccode(self.p_open), repl_pairs)
 
@@ -1227,22 +1363,7 @@ class IonChannel(object):
             file.write("    %s' = (%s_inf - %s) /  tau_%s \n" % (var, var, var, var))
         file.write("}\n\n")
 
-        assignment_lines = []
-        local_vars = []
-        temp_counter = 0
-        for var, svar in zip(sv, self.ordered_statevars):
-            vi_lines, temp_counter, vi_locals = _nmodl_assignment_lines(
-                f"{var}_inf", self.varinf[svar], temp_counter
-            )
-            ti_lines, temp_counter, ti_locals = _nmodl_assignment_lines(
-                f"tau_{var}", self.tauinf[svar], temp_counter
-            )
-            local_vars.extend(vi_locals)
-            local_vars.extend(ti_locals)
-            assignment_lines.extend(vi_lines)
-            assignment_lines.extend(ti_lines)
-
-        assignment_lines = [_nmodl_repl(line, repl_pairs) for line in assignment_lines]
+        assignment_lines, local_vars = self._nmodl_rate_lines(repl_pairs)
 
         file.write("PROCEDURE rates(v%s) {\n" % concstring)
         if local_vars:
@@ -1256,6 +1377,109 @@ class IonChannel(object):
 
         return modname
 
+    def write_arbor_mod_file(self, path, g=0.0, e=None):
+        """
+        Writes a modfile of the ion channel in the NMODL dialect of the Arbor
+        simulator, to be compiled into an Arbor mechanism catalogue.
+
+        Arbor's NMODL differs from NEURON's in that `v` and ion variables can
+        not be declared ``ASSIGNED``, procedures and functions only have access
+        to their arguments, and there is no `pow` function. Hence, the
+        asymptotic values and time-scales of the state variables are computed
+        as ``LOCAL`` variables in the blocks where they are needed.
+
+        Parameters
+        ----------
+        path: str
+            The directory in which the modfile is written
+        g: float
+            Default value of the conductance density ``[uS/cm^2]``.
+            Defaults to 0.
+        e: float or None
+            Default value of the reversal potential ``[mV]``, only used by
+            channels whose driving force contains `e`. Defaults to None, in
+            which case the default reversal of the channel is taken.
+
+        Returns
+        -------
+        str
+            The name of the modfile
+        """
+        cname = self.__class__.__name__
+        sv = [str(svar) for svar in self.ordered_statevars]
+        e = self._get_reversal(e)
+        repl_pairs = self._nmodl_repl_pairs()
+
+        modname = "I" + cname + ".mod"
+        with open(os.path.join(path, modname), "w") as file:
+            file.write(
+                ": This mod file is automaticaly generated by the "
+                + "``neat.channels.ionchannels`` module\n\n"
+            )
+
+            file.write("NEURON {\n")
+            file.write(f"    SUFFIX I{cname}\n")
+            for line in self._nmodl_current_declaration_lines():
+                file.write(f"    {line}\n")
+            file.write("    RANGE g, e\n" if self._uses_e_rev else "    RANGE g\n")
+            file.write("}\n\n")
+
+            # `v` and `celsius` are made available to Arbor mechanisms by
+            # declaring them as parameters
+            file.write("PARAMETER {\n")
+            file.write(f"    g = {g * 1e-6} (S/cm2)\n")
+            if self._uses_e_rev:
+                file.write(f"    e = {e} (mV)\n")
+            file.write("    v (mV)\n")
+            file.write("    celsius (degC)\n")
+            file.write("}\n\n")
+
+            file.write("STATE {\n")
+            for var in sv:
+                file.write(f"    {var}\n")
+            file.write("}\n\n")
+
+            calc_p_open = _nmodl_repl(_arbor_nmodl_ccode(self.p_open), repl_pairs)
+            file.write("BREAKPOINT {\n")
+            file.write("    SOLVE states METHOD cnexp\n")
+            if self._uses_e_rev:
+                file.write(f"    i{self.ion} = g * ({calc_p_open}) * (v - e)\n")
+            else:
+                df_expr = self.driving_force.subs(self.sp_t, sp.Symbol("celsius"))
+                df_lines, _, df_locals = _nmodl_assignment_lines(
+                    "df", df_expr, 0, ccode=_arbor_nmodl_ccode
+                )
+                df_locals = list(dict.fromkeys(df_locals + ["df"]))
+                file.write(f"    LOCAL {', '.join(df_locals)}\n")
+                for line in df_lines:
+                    file.write(f"    {_nmodl_repl(line, repl_pairs)}\n")
+                file.write(f"    i{self.ion} = g * ({calc_p_open}) * df\n")
+            file.write("}\n\n")
+
+            rate_lines, rate_locals = self._nmodl_rate_lines(
+                repl_pairs, ccode=_arbor_nmodl_ccode
+            )
+            local_vars = [str(self.sp_t)] + rate_locals
+            for var in sv:
+                local_vars += [f"{var}_inf", f"tau_{var}"]
+            local_str = ", ".join(dict.fromkeys(local_vars))
+
+            for block, state_lines in [
+                ("INITIAL", [f"{var} = {var}_inf" for var in sv]),
+                (
+                    "DERIVATIVE states",
+                    [f"{var}' = ({var}_inf - {var}) / tau_{var}" for var in sv],
+                ),
+            ]:
+                file.write(f"{block} {{\n")
+                file.write(f"    LOCAL {local_str}\n")
+                file.write(f"    {self.sp_t} = celsius\n")
+                for line in rate_lines + state_lines:
+                    file.write(f"    {line}\n")
+                file.write("}\n\n")
+
+        return modname
+
     def _create_nestml_funcstr(self, code_str, n_spaces=0, indent=8):
         """
         This function is used to recursively expand if... else... statements
@@ -1264,22 +1488,40 @@ class IonChannel(object):
         """
         tree = ast.parse(code_str)
         iev = IfExpVisitor()
-        ifexp = iev.find_IfExp_node(tree)
+        ifexp = iev.find_expandable_IfExp_node(tree)
 
         if ifexp is not None:
-            # sanity check
-            assert iev.find_IfExp_node(ifexp.test) is None
+            test_str = ast.unparse(ifexp.test)
+
+            # constant tests -- which arise when expanding nested conditionals
+            # -- are resolved here, as `True` and `False` are not valid NESTML
+            if isinstance(ifexp.test, ast.Constant) and isinstance(
+                ifexp.test.value, bool
+            ):
+                branch = "body" if ifexp.test.value else "orelse"
+                return self._create_nestml_funcstr(
+                    _expand_ifexp_branch(code_str, test_str, branch),
+                    n_spaces=n_spaces,
+                    indent=indent,
+                )
+
+            # the conditional is replaced by its branches within the expression
+            # as a whole, as it need not be the root node of the ast
             # if test is True
             cond_1_str = self._create_nestml_funcstr(
-                ast.unparse(ifexp.body), n_spaces=n_spaces, indent=n_spaces + indent
+                _expand_ifexp_branch(code_str, test_str, "body"),
+                n_spaces=n_spaces,
+                indent=n_spaces + indent,
             )
             # if test is False
             cond_0_str = self._create_nestml_funcstr(
-                ast.unparse(ifexp.orelse), n_spaces=n_spaces, indent=n_spaces + indent
+                _expand_ifexp_branch(code_str, test_str, "orelse"),
+                n_spaces=n_spaces,
+                indent=n_spaces + indent,
             )
             code_str = (
                 " " * indent
-                + f"if {ast.unparse(ifexp.test)}:\n"
+                + f"if {test_str}:\n"
                 + f"{cond_1_str}"
                 + " " * indent
                 + f"else:\n"

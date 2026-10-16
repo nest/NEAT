@@ -386,6 +386,18 @@ class TestNeuron:
         assert len(res1["t"]) == len(res2["t"])
         assert res1["v_m"].shape == res2["v_m"].shape
 
+    @SKIP_ACTIVE_MECHS_WITH_CORENEURON
+    def test_calc_e_eq(self):
+        self.load_T_tree_active()
+        self.neurontree.set_simulation_parameters(t_calibrate=0.0, dt=0.1)
+        v_eq = self.neurontree.calc_e_eq(t_dur=500.0)
+
+        nodes = list(self.neurontree)
+        assert v_eq.shape == (len(nodes),)
+        # the leak was fitted to yield an equilibrium potential of -75 mV
+        assert np.allclose(v_eq, self.v_eq, atol=1e-3)
+        assert np.allclose([node.v_ep for node in nodes], v_eq)
+
 
 class TestReducedNeuron:
     def add_locinds(self):

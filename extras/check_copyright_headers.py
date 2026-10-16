@@ -49,6 +49,7 @@ exclude_dirs = [
     "docs",
     "src/neat/simulations/nest/tmp",
     "src/neat/simulations/neuron/tmp",
+    "src/neat/simulations/arbor/tmp",
     "src/neat/tools/interval",
 ]
 

@@ -24,9 +24,12 @@ import sympy as sp
 
 import pytest
 import pickle
+import inspect
+import subprocess
 import os, shutil
 
 from neat import IonChannel
+from neat.channels.ionchannels import _arbor_nmodl_ccode
 
 import channelcollection_for_tests as channelcollection
 
@@ -445,3 +448,74 @@ if __name__ == "__main__":
     tcns.test_basic()
     test_ionchannel_simplified()
     test_broadcasting()
+
+
+class TestArborModFile:
+    """
+    Tests for the .mod files in the NMODL dialect of the Arbor simulator
+    """
+
+    def _get_channels(self):
+        return [
+            obj()
+            for _, obj in inspect.getmembers(channelcollection)
+            if inspect.isclass(obj)
+            and issubclass(obj, IonChannel)
+            and obj is not IonChannel
+        ]
+
+    def test_arbor_nmodl_printer(self):
+        x, y = sp.symbols("x y")
+        values = {"x": 1.3, "y": 0.7}
+        for expr in [
+            -(x**2),
+            x ** (-2) * y,
+            (x + y) ** 3,
+            x**y,
+            sp.sqrt(x) / x,
+            1 / (x + y),
+            sp.Max(x, y, 1.0),
+            sp.Min(x, y),
+        ]:
+            code = _arbor_nmodl_ccode(expr)
+            assert "pow(" not in code
+            assert "fmax(" not in code and "fmin(" not in code
+            code_py = code.replace("^", "**").replace("sqrt(", "np.sqrt(")
+            assert np.isclose(
+                eval(code_py, {"np": np, "max": max, "min": min}, values),
+                float(expr.subs(values)),
+            )
+
+    def test_arbor_mod_files(self, tmp_path):
+        """
+        Arbor modfiles should not declare `v` and ion variables as ``ASSIGNED``,
+        have no procedures, and should declare the same ions as the NEURON
+        modfiles. If Arbor's NMODL compiler is available, the modfiles must compile.
+        """
+        path_neuron, path_arbor = tmp_path / "neuron", tmp_path / "arbor"
+        path_neuron.mkdir()
+        path_arbor.mkdir()
+        for chan in self._get_channels():
+            modname = chan.write_arbor_mod_file(str(path_arbor))
+            chan.write_mod_file(str(path_neuron))
+            text = (path_arbor / modname).read_text()
+            text_neuron = (path_neuron / modname).read_text()
+
+            assert "ASSIGNED" not in text
+            assert "PROCEDURE" not in text
+            assert "FUNCTION" not in text
+            assert "pow(" not in text
+            parameter_block = text.split("PARAMETER {")[1].split("}")[0]
+            assert "v (mV)" in parameter_block
+            assert "celsius (degC)" in parameter_block
+            assert [l for l in text.splitlines() if "USEION" in l] == [
+                l for l in text_neuron.splitlines() if "USEION" in l
+            ]
+
+            if shutil.which("modcc") is not None:
+                res = subprocess.run(
+                    ["modcc", str(path_arbor / modname), "-o", str(path_arbor)],
+                    capture_output=True,
+                    text=True,
+                )
+                assert res.returncode == 0, res.stdout + res.stderr

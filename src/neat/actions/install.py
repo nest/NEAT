@@ -437,6 +437,70 @@ def _compile_neuron(
     )
 
 
+def _compile_arbor(model_name, path_neat, channels, path_arborresource=None):
+    """
+    Compile the ion channels, together with the mechanisms in
+    `path_arborresource`, into an Arbor mechanism catalogue
+    """
+    import arbor
+
+    path_for_arbor_compilation = os.path.join(
+        path_neat, "simulations/arbor/tmp/", model_name
+    )
+    # delete old compiled files if exist
+    if os.path.exists(path_for_arbor_compilation):
+        shutil.rmtree(path_for_arbor_compilation)
+    path_for_mod_files = os.path.join(path_for_arbor_compilation, "mech/")
+
+    print(f"--- writing channels to \n" f" > {path_for_mod_files}")
+
+    os.makedirs(path_for_mod_files)
+
+    if path_arborresource is not None:
+        for mod_file in glob.glob(os.path.join(path_arborresource, "*.mod")):
+            shutil.copy2(mod_file, path_for_mod_files)
+
+    for chan in channels:
+        print(" - writing Arbor .mod file for:", chan.__class__.__name__)
+        chan.write_arbor_mod_file(path_for_mod_files)
+
+    # the install prefix that `arbor-build-catalogue` has stored at build time
+    # need not exist anymore (e.g. for wheels), so we provide the location of
+    # the arbor package, which contains the required tools and headers
+    path_arbor = os.path.dirname(arbor.__file__)
+    subprocess.run(
+        [
+            os.path.join(path_arbor, "bin", "arbor-build-catalogue"),
+            model_name,
+            "mech/",
+            "--prefix",
+            path_arbor,
+        ],
+        cwd=path_for_arbor_compilation,
+        check=True,
+    )
+
+    metadata_path = os.path.join(path_for_arbor_compilation, "build_info.json")
+    with open(metadata_path, "w") as metadata_file:
+        json.dump(
+            {
+                "arbor_version": arbor.__version__,
+                "platform_system": platform.system(),
+                "platform_machine": platform.machine(),
+            },
+            metadata_file,
+            indent=2,
+            sort_keys=True,
+        )
+
+    print(
+        f"\n------------------------------\n"
+        f"The compiled Arbor catalogue can be loaded using:\n"
+        f'    neat.load_arbor_model("{model_name}")\n'
+        f"------------------------------\n"
+    )
+
+
 def _compile_nest(
     model_name,
     path_neat,
@@ -506,6 +570,7 @@ def _install_models(
     simulators=["neuron", "nest"],
     path_nestresource=None,
     path_neuronresource=None,
+    path_arborresource=None,
     codegen_opts=None,
 ):
     """
@@ -529,6 +594,10 @@ def _install_models(
         Optional path to a directory with .mod files, these modfiles will be
         copied to the NEURON install directory and compiled together with the
         generated channel .mod files
+    path_arborresource: str
+        Optional path to a directory with .mod files in Arbor's NMODL dialect,
+        these modfiles will be compiled together with the generated channel
+        .mod files into an Arbor mechanism catalogue
     codegen_opts: dict
         Extra options for code generation, passed as a JSON string. \n
         Compartmental-specific options:
@@ -553,6 +622,13 @@ def _install_models(
             channels,
             path_neuronresource=path_neuronresource,
             codegen_opts=codegen_opts,
+        )
+    if "arbor" in simulators:
+        _compile_arbor(
+            model_name,
+            path_neat,
+            channels,
+            path_arborresource=path_arborresource,
         )
     if "nest" in simulators:
         _compile_nest(
