@@ -134,6 +134,43 @@ def _mark_neuron_model_loaded(model_path):
     _LOADED_NEURON_MODELS.add(_normalize_model_path(model_path))
 
 
+def _apply_neat_neuron_defaults():
+    """
+    Apply NEAT physiology defaults to the global NEURON runtime.
+
+    NEURON stores default ion concentrations in runtime globals such as
+    ``nai0_na_ion`` and ``cai0_ca_ion``. Newly created sections inherit from
+    these values, so setting them once at the runtime level is cleaner than
+    patching each model instance separately.
+    """
+    try:
+        default_phys = DefaultPhysiology()
+    except Exception:
+        return
+
+    temp = getattr(default_phys, "temp", None)
+    if temp is not None:
+        try:
+            h.celsius = temp
+        except (AttributeError, LookupError):
+            pass
+
+    for ion, value in getattr(default_phys, "conc", {}).items():
+        try:
+            setattr(h, f"{ion}i0_{ion}_ion", value)
+        except (AttributeError, LookupError):
+            pass
+
+    for ion, value in getattr(default_phys, "conc_ext", {}).items():
+        try:
+            setattr(h, f"{ion}o0_{ion}_ion", value)
+        except (AttributeError, LookupError):
+            pass
+
+
+_apply_neat_neuron_defaults()
+
+
 def _get_neuron_runtime_metadata():
     return {
         "neuron_version": neuron.__version__,
@@ -210,11 +247,13 @@ def load_neuron_model(name):
         )
         if os.path.exists(path):
             if _is_neuron_model_loaded(model_path):
+                _apply_neat_neuron_defaults()
                 return
             _validate_neuron_build_metadata(model_path)
             try:
                 h.nrn_load_dll(path)  # load all mechanisms
                 _mark_neuron_model_loaded(model_path)
+                _apply_neat_neuron_defaults()
             except Exception as err:
                 if should_wrap_load_exception(err):
                     raise_load_err(path, err)
@@ -231,6 +270,7 @@ def load_neuron_model(name):
             print(f"Found path: {model_path}, loading mechanisms...")
             if _is_neuron_model_loaded(model_path):
                 print("... already loaded.")
+                _apply_neat_neuron_defaults()
                 return
             _validate_neuron_build_metadata(model_path)
             if not USE_CORENEURON:
@@ -246,6 +286,7 @@ def load_neuron_model(name):
                         f"Loading mechanisms from '{model_path}' failed."
                     )
             _mark_neuron_model_loaded(model_path)
+            _apply_neat_neuron_defaults()
             print(f"... done.")
         else:
             print_err()
@@ -278,7 +319,7 @@ class NeuronSimNode(PhysNode):
     def __init__(self, index, p3d=None):
         super().__init__(index, p3d)
 
-    def _make_section(self, factorlambda=1.0, pprint=False):
+    def _make_section(self, channel_storage, factorlambda=1.0, pprint=False):
         compartment = h.Section(name=str(self.index))
         compartment.push()
         # create the compartment
@@ -306,6 +347,11 @@ class NeuronSimNode(PhysNode):
         compartment.Ra = self.r_a * 1e6  # MOhm*cm --> Ohm*cm
         # insert membrane currents
         for key, current in self.currents.items():
+            # check if the current has a reversal potential that needs to be set
+            uses_e_rev = key == "L"  # True if leak, False otherwise
+            if key != "L" and channel_storage[key]._uses_e_rev:
+                uses_e_rev = True
+
             if current[0] > 1e-10:
                 try:
                     compartment.insert(mechname[key])
@@ -315,7 +361,8 @@ class NeuronSimNode(PhysNode):
                     exec(
                         "seg." + mechname[key] + ".g = " + str(current[0]) + "*1e-6"
                     )  # uS/cm^2 --> S/cm^2
-                    exec("seg." + mechname[key] + ".e = " + str(current[1]))  # mV
+                    if uses_e_rev:
+                        exec("seg." + mechname[key] + ".e = " + str(current[1]))  # mV
         # insert concentration mechanisms
         for ion, params in self.concmechs.items():
             compartment.insert(mechname[ion])
@@ -506,7 +553,9 @@ class NeuronSimTree(PhysTree):
     def _create_neuron_tree(self, pprint):
         for node in self:
             # create the NEURON section
-            compartment = node._make_section(self.factor_lambda, pprint=pprint)
+            compartment = node._make_section(
+                self.channel_storage, self.factor_lambda, pprint=pprint
+            )
             # connect with parent section
             if not self.is_root(node):
                 compartment.connect(self.sections[node.parent_node.index], 1, 0)
@@ -1438,7 +1487,7 @@ class NeuronCompartmentNode(NeuronSimNode):
     def get_child_nodes(self, skip_inds=[]):
         return super().get_child_nodes(skip_inds=skip_inds)
 
-    def _make_section(self, pprint=False):
+    def _make_section(self, channel_storage, pprint=False):
         compartment = neuron.h.Section(name=str(self.index))
         compartment.push()
         # create the compartment
@@ -1461,13 +1510,19 @@ class NeuronCompartmentNode(NeuronSimNode):
         compartment.Ra = self.r_a * 1e6  # MOhm*cm --> Ohm*cm
         # insert membrane currents
         for key, current in self.currents.items():
+            # check if the current has a reversal potential that needs to be set
+            uses_e_rev = key == "L"  # True if leak, False otherwise
+            if key != "L" and channel_storage[key]._uses_e_rev:
+                uses_e_rev = True
+
             if current[0] > 1e-10:
                 compartment.insert(mechname[key])
                 for seg in compartment:
                     exec(
                         "seg." + mechname[key] + ".g = " + str(current[0]) + "*1e-6"
                     )  # uS/cm^2 --> S/cm^2
-                    exec("seg." + mechname[key] + ".e = " + str(current[1]))  # mV
+                    if uses_e_rev:
+                        exec("seg." + mechname[key] + ".e = " + str(current[1]))  # mV
         # insert concentration mechanisms
         for ion, params in self.concmechs.items():
             compartment.insert(mechname[ion])
@@ -1640,7 +1695,7 @@ class NeuronCompartmentTree(NeuronSimTree):
     def _create_neuron_tree(self, pprint):
         for node in self:
             # create the NEURON section
-            compartment = node._make_section(pprint=pprint)
+            compartment = node._make_section(self.channel_storage, pprint=pprint)
             # connect with parent section
             if not self.is_root(node):
                 compartment.connect(self.sections[node.parent_node.index], 0.5, 0)

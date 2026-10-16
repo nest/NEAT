@@ -32,6 +32,10 @@ class DefaultPhysiology:
     conc: Dict[str, float] = field(
         default_factory=lambda: {"na": 10.0, "k": 54.4, "ca": 1e-4}  # mM
     )
+    # default extracellular concentrations (same as NEURON)
+    conc_ext: Dict[str, float] = field(
+        default_factory=lambda: {"ca": 2.0, "na": 140.0, "k": 5.0}  # mM
+    )
     # default ion channel reversals
     e_rev: Dict[str, float] = field(
         default_factory=lambda: {"na": 50.0, "k": -85.0, "ca": 50.0}  # mV
