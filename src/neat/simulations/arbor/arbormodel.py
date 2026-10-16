@@ -467,8 +467,12 @@ class ArborSimTree(SimTreeMixin, PhysTree):
         avoid_endpoints: bool
             If ``True``, locations at the ends of a node are moved slightly
             inwards, so that they do not fall in the zero-area control volume
-            at a fork point, where no mechanisms are present. Defaults to
-            ``False``.
+            at a fork point, where no density mechanisms are present and ion
+            concentrations do not follow the dynamics of the adjacent nodes.
+            Must be ``True`` when probing quantities that depend on density
+            mechanisms (state variables, concentrations, ion currents).
+            Defaults to ``False``, for point processes and the membrane
+            voltage, which are well defined at fork points.
         """
         x = loc["x"]
         if avoid_endpoints:
@@ -983,7 +987,7 @@ class ArborSimTree(SimTreeMixin, PhysTree):
             traces[ion] = [
                 add_probe(
                     arbor.cable_probe_ion_int_concentration,
-                    self._get_locset(loc),
+                    self._get_locset(loc, avoid_endpoints=True),
                     ion,
                     default=default_conc.get(ion, 0.0),
                 )

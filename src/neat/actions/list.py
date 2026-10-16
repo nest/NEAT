@@ -23,7 +23,7 @@ import os
 import glob
 
 
-def _list_models(path_neat, simulators=["nest", "neuron"], pprint=True):
+def _list_models(path_neat, simulators=["nest", "neuron", "arbor"], pprint=True):
     """
     Get (and print) a dictionary containing all installed model
 

@@ -55,7 +55,7 @@ def remove_nrnspecial_wrapper(model_name):
 def _uninstall_models(
     *model_names,
     path_neat,
-    simulators=["nest", "neuron"],
+    simulators=["nest", "neuron", "arbor"],
 ):
     """
     Uninstall the model with the given name from the provided simulators

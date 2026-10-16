@@ -26,6 +26,8 @@ Note that if you install NEAT with pip, as above, NEURON will automatically be i
 To use NEAT with `NEST <https://nest-simulator.readthedocs.io/en/stable/index.html>`_, 
 you need to manually install NEST and nestml on your system, by following the detailed
 `installation instructions <https://nest-simulator.readthedocs.io/en/stable/installation/index.html>`_.
+To use NEAT with `Arbor <https://arbor-sim.org>`_, install Arbor with
+`pip install nest-neat[arbor]` (or `pip install arbor`).
 
 
 **Testing the installation**
@@ -43,6 +45,12 @@ This installs the default channels for NEURON. To install them for NEST, use:
 .. code-block:: shell
 
     neatmodels install default -s nest
+
+and to install them for Arbor, use:
+
+.. code-block:: shell
+
+    neatmodels install default -s arbor
 
 To test the installation (requires `pytest`)
 ::

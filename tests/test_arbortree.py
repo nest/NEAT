@@ -253,10 +253,9 @@ class TestArbor:
         assert np.allclose(v_eq, self.v_eq, atol=1e-3)
         assert np.allclose([node.v_ep for node in nodes], v_eq)
 
-    def test_neuron_equivalence(self):
+    def _load_axon_tree(self):
         """
-        Test whether Arbor and NEURON simulations of a spiking model with ion
-        channels and calcium dynamics yield the same results
+        Load the ball-and-axon morphology with ion channels and calcium dynamics
         """
         tree = PhysTree(
             os.path.join(MORPHOLOGIES_PATH_PREFIX, "ball_and_axon.swc"),
@@ -290,6 +289,15 @@ class TestArbor:
                 node_arg=node_arg,
             )
         tree.set_comp_tree()
+
+        return tree
+
+    def test_neuron_equivalence(self):
+        """
+        Test whether Arbor and NEURON simulations of a spiking model with ion
+        channels and calcium dynamics yield the same results
+        """
+        tree = self._load_axon_tree()
 
         locs = [(1, 0.5), (4, 0.5), (4, 1.0), (5, 0.5), (5, 1.0)]
         res = {}
@@ -328,6 +336,33 @@ class TestArbor:
         assert len(res_neuron["spikes"]) == len(res_arbor["spikes"])
         assert np.allclose(res_neuron["spikes"], res_arbor["spikes"], atol=0.2)
         assert np.allclose(res_neuron["ca"], res_arbor["ca"], rtol=5e-2)
+
+    def test_fork_point_recording(self):
+        """
+        Quantities that depend on density mechanisms should be recorded at the
+        same values at the fork point and just next to it
+        """
+        tree = self._load_axon_tree()
+        # fork points between nodes 4 and 5, and their neighbouring locations
+        locs = [(4, 1.0), (4, 0.999), (5, 0.0), (5, 0.001)]
+        sim_tree = ArborSimTree(tree)
+        sim_tree.init_model(t_calibrate=100.0, factor_lambda=10)
+        sim_tree.store_locs(locs, name="rec locs")
+        sim_tree.add_i_clamp((1, 0.5), 0.8, 10.0, 100.0)
+        res_arbor = sim_tree.run(
+            100.0,
+            record_from_channels=True,
+            record_concentrations=["ca"],
+            record_currents=["ca"],
+        )
+        sim_tree.delete_model()
+
+        for res_ in [res_arbor["ca"], res_arbor["ica"]] + [
+            trace for trace in res_arbor["chan"]["Ca_HVA"].values()
+        ]:
+            assert np.allclose(res_[0], res_[1])
+            assert np.allclose(res_[2], res_[3])
+        assert np.max(res_arbor["ca"][0]) > 1.5 * res_arbor["ca"][0, 0]
 
 
 class TestReducedArbor:
