@@ -85,6 +85,7 @@ Compartment Tree
    CompartmentTree.get_conc_eq
    CompartmentTree.fit_e_leak
    CompartmentTree.calc_impedance_matrix
+   CompartmentTree.calc_impulse_response_matrix
    CompartmentTree.calc_conductance_matrix
    CompartmentTree.calc_system_matrix
    CompartmentTree.calc_eigenvalues
@@ -123,11 +124,13 @@ Neural Evaluation Tree
    NET.set_new_loc_idxs
    NET.get_reduced_tree
    NET.calc_total_impedance
+   NET.calc_total_kernel
    NET.calc_i_z
    NET.calc_i_z_matrix
    NET.calc_impedance_matrix
-   NET.calc_impedance_matrix
    NET.calc_compartmentalization
+   NET.compute_cond_rescale
+   NET.improve_input_resistance
    NET.plot_dendrogram
 
 
@@ -142,6 +145,8 @@ Neural Evaluation Tree
    Kernel.k_bar
    Kernel.t
    Kernel.ft
+   Kernel.diff
+   Kernel.fit_c
 
 
 *******************
@@ -229,6 +234,7 @@ locations
    MorphTree.distribute_locs_at_d2s
    MorphTree.distribute_locs_uniform
    MorphTree.distribute_locs_random
+   MorphTree.distribute_locs_finite_diff
    MorphTree.extend_with_bifurcation_locs
    MorphTree.unique_locs
    MorphTree.path_length
@@ -258,6 +264,7 @@ Creating new trees from the existing tree.
 .. autosummary::
    :toctree: generated/
 
+   MorphTree.find_common_root
    MorphTree.create_new_tree
    MorphTree.create_compartment_tree
    MorphTree.__copy__
@@ -326,9 +333,14 @@ Separation of Variables Tree
 
    SOVTree.create_corresponding_node
    SOVTree.calc_sov_equations
+   SOVTree.get_sov_matrices
    SOVTree.get_mode_importance
    SOVTree.get_important_modes
+   SOVTree.get_kernels
+   SOVTree.calc_zf
+   SOVTree.calc_zt
    SOVTree.calc_impedance_matrix
+   SOVTree.calc_impulse_response_matrix
    SOVTree.construct_net
    SOVTree.compute_lin_terms
 
@@ -390,8 +402,18 @@ Compute equilibrium potentials and concentrations
    EquilibriumTree.set_e_eq
 
 
-Cacheing the Greens function and separation of variables expansion
+Caching the Greens function and separation of variables expansion
 ==================================================================
+
+.. autoclass:: neat.CachedTree
+
+.. autosummary::
+   :toctree: generated/
+
+   CachedTree.get_cache_defaults
+   CachedTree.set_cache_params
+   CachedTree.get_cache_params
+   CachedTree.maybe_execute_funcs
 
 .. autoclass:: neat.CachedGreensTree
 
@@ -399,20 +421,21 @@ Cacheing the Greens function and separation of variables expansion
    :toctree: generated/
 
    CachedGreensTree.set_impedances_in_tree
+   CachedGreensTree.calc_net_steadystate
 
 .. autoclass:: neat.CachedGreensTreeTime
 
 .. autosummary::
    :toctree: generated/
 
-   CachedGreensTree.set_impedances_in_tree
+   CachedGreensTreeTime.set_impedances_in_tree
 
 .. autoclass:: neat.CachedSOVTree
 
 .. autosummary::
    :toctree: generated/
 
-   CachedGreensTree.set_sov_in_tree
+   CachedSOVTree.set_sov_in_tree
 
 
 Fitting reduced models
@@ -430,10 +453,12 @@ To get stored fit results and associated location lists
 
 .. autosummary::
    :toctree: generated/
-   CompartmentFitter.convert_fit_arg
 
-To check the faithfullness of the passive reduction, the following functions
-implement vizualisation of impedance kernels.
+   CompartmentFitter.convert_fit_arg
+   CompartmentFitter.remove_fit
+
+To check the faithfulness of the passive reduction, the following functions
+implement visualization of impedance kernels and SOV quantities.
 
 .. autosummary::
    :toctree: generated/
@@ -441,6 +466,7 @@ implement vizualisation of impedance kernels.
    CompartmentFitter.check_passive
    CompartmentFitter.get_kernels
    CompartmentFitter.plot_kernels
+   CompartmentFitter.plot_sov
 
 Individual fit functions.
 
@@ -455,10 +481,9 @@ Individual fit functions.
    CompartmentFitter.fit_channels
    CompartmentFitter.fit_concentration
    CompartmentFitter.fit_capacitance
-   CompartmentFitter.fit_syn_rescale
    CompartmentFitter.fit_e_eq
 
-`neat.CompartmentFitter` can also computed conductance rescale values for synapses
+`neat.CompartmentFitter` can also compute conductance rescale values for synapses
 at sites on the original morphology, when they are shifted to compartment locations
 on the reduced morphology. For this, the average conductances of each synapses need
 to be known.
@@ -466,6 +491,9 @@ to be known.
 .. autosummary::
    :toctree: generated/
 
+   CompartmentFitter.get_net
+   CompartmentFitter.recalc_impedance_matrix
+   CompartmentFitter.assign_locs_to_comps
    CompartmentFitter.fit_syn_rescale
 
 
@@ -483,8 +511,10 @@ Simulate full models in NEURON
    :toctree: generated/
 
    NeuronSimTree.create_corresponding_node
+   NeuronSimTree.set_simulation_parameters
    NeuronSimTree.init_model
    NeuronSimTree.delete_model
+   NeuronSimTree.set_rec_locs
    NeuronSimTree.add_shunt
    NeuronSimTree.add_double_exp_current
    NeuronSimTree.add_exp_synapse
@@ -500,6 +530,9 @@ Simulate full models in NEURON
    NeuronSimTree.set_spiketrain
    NeuronSimTree.run
    NeuronSimTree.calc_e_eq
+   NeuronSimTree.calc_impedance_matrix
+   NeuronSimTree.calc_zt
+   NeuronSimTree.calc_impulse_response_matrix
 
 .. autoclass:: neat.NeuronSimNode
 
@@ -524,9 +557,34 @@ Simulate reduced compartmental models in NEURON
    NeuronCompartmentTree.add_sin_clamp
    NeuronCompartmentTree.add_ou_clamp
    NeuronCompartmentTree.add_ou_conductance
+   NeuronCompartmentTree.add_ou_reversal
    NeuronCompartmentTree.add_v_clamp
 
 .. autoclass:: neat.NeuronCompartmentNode
+
+
+Simulate reduced compartmental models in Brian2
+===============================================
+
+.. autoclass:: neat.Brian2CompartmentTree
+
+.. autosummary::
+   :toctree: generated/
+
+   Brian2CompartmentTree.create_corresponding_node
+   Brian2CompartmentTree.get_compartment_index
+   Brian2CompartmentTree.morpho_access_string
+   Brian2CompartmentTree.add_double_exp_synapse
+   Brian2CompartmentTree.get_on_pre
+   Brian2CompartmentTree.initialise_at_veq
+   Brian2CompartmentTree.init_model
+
+.. autoclass:: neat.Brian2CompartmentNode
+
+.. autosummary::
+   :toctree: generated/
+
+   Brian2CompartmentNode.fake_surface
 
 
 Simulate reduced compartmental models in NEST
@@ -553,6 +611,20 @@ Neural evaluation tree simulator
 Miscellaneous
 *************
 
+Defining concentration mechanisms
+=================================
+
+.. autoclass:: neat.ExpConcMech
+
+.. autosummary::
+   :toctree: generated/
+
+   ExpConcMech.items
+   ExpConcMech.compute_linear
+   ExpConcMech.compute_lin
+   ExpConcMech.compute_lin_tau_fit
+   ExpConcMech.write_nestml_blocks
+
 
 Defining ion channels
 =====================
@@ -563,18 +635,22 @@ Defining ion channels
    :toctree: generated/
 
    IonChannel.set_default_params
+   IonChannel.ordered_statevars
    IonChannel.compute_p_open
    IonChannel.compute_derivatives
    IonChannel.compute_derivativesConc
    IonChannel.compute_varinf
    IonChannel.compute_tauinf
+   IonChannel.compute_lin_statevar_response
    IonChannel.compute_linear
    IonChannel.compute_linear_conc
    IonChannel.compute_lin_sum
    IonChannel.compute_lin_conc
+   IonChannel.write_mod_file
+   IonChannel.write_cpp_code
 
 
-Compute Fourrier transforms
+Compute Fourier transforms
 ===========================
 
 .. autoclass:: neat.FourierQuadrature
@@ -585,3 +661,10 @@ Compute Fourrier transforms
    FourierQuadrature.__call__
    FourierQuadrature.ft
    FourierQuadrature.ft_inv
+
+.. autoclass:: neat.FourierTools
+
+.. autosummary::
+   :toctree: generated/
+
+   FourierTools.inverse_fourier

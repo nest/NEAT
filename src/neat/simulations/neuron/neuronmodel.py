@@ -567,7 +567,7 @@ class NeuronSimTree(PhysTree):
                 self.shunts.append(shunt)
 
     def set_rec_locs(self, locs):
-        self.store_locs(rec_locs, "rec locs")
+        self.store_locs(locs, "rec locs")
 
     def add_shunt(self, loc, g, e_r):
         """
