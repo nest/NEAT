@@ -57,6 +57,7 @@ dependencies = [
     "scikit_learn >= 1.1.1",
     "neuron >= 8.2.0",
     "dill >= 0.3.8",
+    "six >= 1.16.0",
 ]
 
 [project.optional-dependencies]
