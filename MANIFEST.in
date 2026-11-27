@@ -1,13 +1,13 @@
-include LICENCE.txt
+include LICENSE.txt
 
-include neat/simulations/net/Ionchannels.h
-include neat/simulations/net/Ionchannels.cc
-include neat/simulations/net/netsim.pyx
-include neat/simulations/net/NETC.h
-include neat/simulations/net/NETC.cc
-include neat/simulations/net/Synapses.h
-include neat/simulations/net/Synapses.cc
-include neat/simulations/net/Tools.cc
+include src/neat/simulations/net/Ionchannels.h
+include src/neat/simulations/net/Ionchannels.cc
+include src/neat/simulations/net/netsim.pyx
+include src/neat/simulations/net/NETC.h
+include src/neat/simulations/net/NETC.cc
+include src/neat/simulations/net/Synapses.h
+include src/neat/simulations/net/Synapses.cc
+include src/neat/simulations/net/Tools.cc
 
 include src/neat/simulations/neuron/mech_storage/*.mod
 include src/neat/simulations/nest/*.nestml
