@@ -1,4 +1,4 @@
-include LICENCE.txt
+include LICENSE.txt
 
 include src/neat/simulations/net/Ionchannels.h
 include src/neat/simulations/net/Ionchannels.cc
